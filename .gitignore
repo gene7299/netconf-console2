@@ -1,0 +1,31 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Build and packaging output
+build/
+dist/
+*.7z
+
+# Local smoke-test and tool state
+.history-smoke-profile/
+.coverage
+htmlcov/
+
+# Local secrets and connection material
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+certs/
+logs/
