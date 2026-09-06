@@ -45,7 +45,7 @@ exportToColleague\
 ├── requirements-runtime.txt   runtime dependency list
 ├── install-netconf-console2.ps1
 ├── run-netconf-console2.ps1
-├── netconf_console2-3.2.0-py3-none-any.whl   optional fallback
+├── netconf_console2-3.2.1-py3-none-any.whl   optional fallback
 ├── COMMAND_REFERENCE_ZH_TW.md
 ├── INSTALL_WINDOWS.md
 ├── LICENSE.txt
@@ -98,6 +98,24 @@ TLS Call Home：
 
 `--password` 不帶明文值時會顯示遮罩輸入。Call Home 需要 Windows Firewall
 允許指定的 inbound TCP port，並讓 O-RU 能路由到此 Windows 主機。
+
+## Pretty XML 與直接存檔
+
+若要直接保存排版好的 UTF-8 XML（3.2.1 起）：
+
+```text
+netconf> get-config --db running --pretty --out .\cobra-running-config.xml
+netconf> get --pretty --out .\cobra-all-data.xml
+```
+
+也可離線排版既有 XML，並修正 PowerShell 重導造成的 UTF-16 編碼問題：
+
+```powershell
+.\run-netconf-console2.ps1 --format-xml .\cobra-running-config1.xml `
+  --pretty --out .\cobra-running-config1s.xml
+```
+
+檔案由程式直接以 UTF-8 寫入，不需使用 `>`、`iconv` 或 `xmllint`。
 
 ## `namespaces` 與 `namespaces refresh`
 

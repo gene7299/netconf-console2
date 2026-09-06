@@ -25,6 +25,7 @@ from .session import (
     NotConnectedError,
 )
 from .trace import TraceSink, redact_secrets
+from .xmloutput import XmlResult, emit_xml, read_xml
 
 
 LOGGER = logging.getLogger(__name__)
@@ -84,19 +85,29 @@ class ExpressionOperation(operations.Operation):
         if getattr(ns, "cmd_parser", None) is not None:
             ns.cmd_parser.print_help()
             return None
+        if getattr(ns, "out", None) is None:
+            ns.out = getattr(parent_ns, "out", None)
         try:
             operation = ns.op
+            if ns.out and "out" not in operation.command_opts:
+                raise ValueError("--out is only supported for XML queries, rpc and get-schema")
             if hasattr(ns, "value"):
                 value = ns.value
                 if value is None:
-                    return operation.invoke(mc, ns)
-                if operation.nargs == "*":
-                    return operation.invoke(mc, ns, *value)
-                return operation.invoke(mc, ns, value)
-            return operation.invoke(mc, ns)
+                    result = operation.invoke(mc, ns)
+                elif operation.nargs == "*":
+                    result = operation.invoke(mc, ns, *value)
+                else:
+                    result = operation.invoke(mc, ns, value)
+            else:
+                result = operation.invoke(mc, ns)
+            if isinstance(result, (etree._Element, etree._ElementTree)):
+                mode = getattr(ns, "command_output", None) or getattr(mc, "output_mode", "pretty")
+                return XmlResult(result, mode, ns.out)
+            return result
         except RPCError as exc:
             if self.process_errors:
-                return exc.xml
+                return XmlResult(exc.xml, getattr(mc, "output_mode", "pretty"))
             raise
         except Exception as exc:
             if self.process_errors:
@@ -179,7 +190,11 @@ command_option_args = {
     "stop": _descriptor(["--stop-time", "--end"], dest="stop", default=None,
                          help="Notification replay stop time."),
     "out": _descriptor(["--out", "--output-file"], dest="out", default=None,
-                        help="Write schema or operation output to a file."),
+                        help="Save XML/schema directly as UTF-8; '-' writes to stdout."),
+    "output": _descriptor(["--output"], dest="command_output", default=None,
+                           choices=["raw", "pretty"], help="XML output format for this command."),
+    "pretty": _descriptor(["--pretty"], dest="command_output", action="store_const",
+                           const="pretty", default=None, help="Alias for --output pretty."),
     "capability_raw": _descriptor(["--raw"], dest="capability_raw", action="store_true",
                                   default=False, help="Print raw capability URIs."),
     "content": _descriptor(["--content"], dest="content", nargs="?", const=True, default=None,
@@ -257,7 +272,7 @@ def command_options_parser(operation=None):
         # parser owns their global counterparts (`--version` for NETCONF
         # framing and `--raw` for output), while interactive subparsers still
         # receive them for `get-schema --version` and `capabilities --raw`.
-        if operation is None and option in {"schema_version", "capability_raw"}:
+        if operation is None and option in {"schema_version", "capability_raw", "output", "pretty"}:
             continue
         if option == "connection":
             _add_connection_options(group)
@@ -324,6 +339,10 @@ def argparser():
     parser.add_argument("--listen-port", type=int, default=None, help="Call Home listen port.")
     parser.add_argument("--output", choices=["raw", "pretty"], default="pretty",
                         help="XML output format.")
+    parser.add_argument("--pretty", dest="output", action="store_const", const="pretty",
+                        default=argparse.SUPPRESS, help="Alias for --output pretty.")
+    parser.add_argument("--format-xml", metavar="FILE",
+                        help="Format an existing XML file offline (or '-' for stdin); use --out to save UTF-8.")
     parser.add_argument("--watch", action="store_true",
                         help="After subscribe/create-subscription, consume notifications until Ctrl+C.")
     parser.add_argument("--raw", nargs="?", const=True, default=None, metavar="FILE",
@@ -604,8 +623,11 @@ def _context_command_methods(ctx):
     ctx.listen_from_command = listen_from_command
 
 
-def _print_result(result, output_mode="pretty"):
+def _print_result(result, output_mode="pretty", outfile=None):
     if result is None:
+        return
+    if isinstance(result, XmlResult):
+        emit_xml(result.element, result.mode, result.filename)
         return
     if isinstance(result, operations.TextResult):
         sys.stdout.write(result.text)
@@ -615,14 +637,8 @@ def _print_result(result, output_mode="pretty"):
     if isinstance(result, (bytes, bytearray)):
         sys.stdout.write(result.decode("utf-8", errors="replace"))
         return
-    if hasattr(result, "tag"):
-        rendered = etree.tostring(
-            result,
-            encoding="UTF-8",
-            xml_declaration=True,
-            pretty_print=output_mode != "raw",
-        )
-        sys.stdout.write(rendered.decode("utf-8"))
+    if isinstance(result, (etree._Element, etree._ElementTree)):
+        emit_xml(result, output_mode, outfile)
         return
     sys.stdout.write(str(result) + "\n")
 
@@ -631,7 +647,7 @@ def _invoke_operation(ctx, operation, ns, args, output_mode):
     try:
         ns.discovered_namespaces = ctx.namespace_registry.mapping()
         result = operation.invoke(ctx, ns, *args)
-        _print_result(result, output_mode)
+        _print_result(result, output_mode, getattr(ns, "out", None))
         return 0
     except RPCError as exc:
         _print_result(exc.xml, output_mode)
@@ -771,6 +787,21 @@ def main(argv=None):
     except (ValueError, ParserException) as exc:
         parser.error(str(exc))
         return 2
+    if ns.format_xml is not None:
+        if ns.operations or ns.filename or ns.interactive or ns.call_home:
+            parser.error("--format-xml is offline; do not combine it with NETCONF commands or --interactive")
+        try:
+            emit_xml(read_xml(ns.format_xml, ns.huge_tree), ns.output, ns.out)
+            return 0
+        except Exception as exc:
+            report_exception(exc, ns.debug)
+            return 1
+    if ns.out and ns.out != "-":
+        if ns.interactive or ns.filename or len(ns.operations) != 1:
+            parser.error("--out requires one command; in interactive mode, add --out to get/get-config/rpc")
+        operation = ns.operations[0][0]
+        if not isinstance(operation, ExpressionOperation) and "out" not in operation.command_opts:
+            parser.error("--out supports get, get-config, get-data, rpc, get-schema and --format-xml")
     if ns.operations == [] and ns.filename is None:
         ns.interactive = True
     if ns.interactive and ns.operations or ns.interactive and ns.filename is not None:

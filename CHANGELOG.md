@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.2.1 - 2026-09-06
+
+- Added `--out` / `--output-file` for get, get-config, get-data and raw RPC
+  replies, saving UTF-8 XML directly without PowerShell redirection.
+- Added `--pretty` as an alias for `--output pretty`, including per-command
+  formatting in the interactive console. Leaf text, mixed content and
+  `xml:space="preserve"` remain intact.
+- Added offline `--format-xml FILE`, including UTF-16/32 input whose XML
+  declaration was left as UTF-8 by shell redirection.
+- Added regression coverage for encoding, indentation, XML-only output,
+  failed queries, and file export over all four frozen transport modes.
+
 ## 3.2.0 - 2026-09-04
 
 - Added a Windows x64 one-file executable build, frozen-runtime transport

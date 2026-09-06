@@ -243,7 +243,8 @@ class Hello(Operation):
 
 
 class GetOperation(Operation):
-    command_opts = ["style", "wdefaults", "xpath", "filter", "filter_file", "winactive"]
+    command_opts = ["style", "wdefaults", "xpath", "filter", "filter_file", "winactive",
+                    "out", "output", "pretty"]
     nargs = "?"
 
     def invoke(self, mc: Any, ns: Any, path: str | None = None) -> Any:
@@ -612,6 +613,8 @@ class GetSchema(Operation):
         if callable(learner):
             learner(schema_text, items[0])
         outfile = getattr(ns, "out", None)
+        if outfile == "-":
+            return TextResult(schema_text)
         if outfile:
             _write_text(outfile, schema_text)
             return TextResult("Saved schema %s to %s" % (identifier, outfile))
@@ -717,7 +720,7 @@ class Rpc(Operation):
     option = name = "rpc"
     aliases = ("user-rpc",)
     nargs = "?"
-    command_opts = ["content", "full"]
+    command_opts = ["content", "full", "out", "output", "pretty"]
     arg_completion = staticmethod(completions.filename_arg_completion)
     help = "Send an XML operation body, or a full message-id preserving <rpc> envelope"
 
@@ -787,7 +790,8 @@ class GetData(Operation):
     name = "get_data"
     nargs = "?"
     command_opts = [
-        "datastore", "xpath", "filter", "filter_file", "wdefaults", "depth", "origin", "with_origin"
+        "datastore", "xpath", "filter", "filter_file", "wdefaults", "depth", "origin", "with_origin",
+        "out", "output", "pretty"
     ]
     help = "Retrieve an NMDA datastore using RFC 8526 get-data"
 

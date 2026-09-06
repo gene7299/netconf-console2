@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable
 
 import paramiko
+from lxml import etree
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -74,17 +75,30 @@ def serve_netconf(stream: object) -> None:
         raise RuntimeError("client did not send a NETCONF hello")
     stream.sendall(SERVER_HELLO)
 
-    request = recv_until(stream)
-    if b"close-session" not in request:
-        raise RuntimeError("client did not close the NETCONF session cleanly")
-    match = re.search(rb"message-id=['\"]([^'\"]+)['\"]", request)
-    if match is None:
-        raise RuntimeError("close-session did not contain a message-id")
-    reply = (
-        b'<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" '
-        b'message-id="' + match.group(1) + b'"><ok/></rpc-reply>' + END
-    )
-    stream.sendall(reply)
+    while True:
+        request = recv_until(stream)
+        operation = etree.fromstring(request.split(END, 1)[0])[0]
+        command = etree.QName(operation).localname
+        match = re.search(rb"message-id=['\"]([^'\"]+)['\"]", request)
+        if match is None:
+            raise RuntimeError("RPC did not contain a message-id")
+        if command == "get-config":
+            payload = (
+                '<data><interfaces xmlns="urn:test"><interface>'
+                '<name>乙太網路 eth0</name><enabled>true</enabled>'
+                '</interface></interfaces></data>'
+            ).encode("utf-8")
+        elif command == "close-session":
+            payload = b"<ok/>"
+        else:
+            raise RuntimeError("unexpected RPC: " + command)
+        reply = (
+            b'<rpc-reply xmlns="urn:ietf:params:xml:ns:netconf:base:1.0" '
+            b'message-id="' + match.group(1) + b'">' + payload + b'</rpc-reply>' + END
+        )
+        stream.sendall(reply)
+        if command == "close-session":
+            return
 
 
 def listen_loopback() -> tuple[socket.socket, int]:
@@ -149,11 +163,13 @@ def run_case(
     executable: Path,
     arguments: list[str],
     peer: Callable[[], None],
+    output_file: Path,
 ) -> None:
     thread, failures = start_worker(peer)
     try:
         completed = subprocess.run(
-            [str(executable), *arguments, "--hello"],
+            [str(executable), *arguments, "--interactive"],
+            input='hello\nget-config --db running --pretty --out "%s"\nquit\n' % output_file,
             cwd=str(executable.parent),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -175,7 +191,33 @@ def run_case(
         )
     if "Negotiated NETCONF version: 1.0" not in completed.stdout:
         raise RuntimeError(f"{name}: NETCONF hello result was not printed\n{completed.stdout}")
+    verify_xml_output(output_file)
     print(f"[OK] {name}")
+
+
+def verify_xml_output(filename: Path) -> None:
+    data = filename.read_bytes()
+    if b"encoding='UTF-8'" not in data or b"\n  <" not in data or b"\x00" in data:
+        raise RuntimeError("XML output is not pretty-printed UTF-8: " + str(filename))
+    root = etree.fromstring(data)
+    if root.find(".//{urn:test}name").text != "乙太網路 eth0":
+        raise RuntimeError("UTF-8 leaf value was not preserved: " + str(filename))
+
+
+def run_offline_case(executable: Path, directory: Path) -> None:
+    source = directory / "powershell-utf16.xml"
+    output = directory / "offline-pretty.xml"
+    text = ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<data><interface xmlns="urn:test"><name>乙太網路 eth0</name></interface></data>')
+    source.write_bytes(text.encode("utf-16"))
+    completed = subprocess.run(
+        [str(executable), "--format-xml", str(source), "--pretty", "--out", str(output)],
+        capture_output=True, text=True, encoding="utf-8", timeout=25.0,
+    )
+    if completed.returncode:
+        raise RuntimeError("Frozen offline XML formatting failed: " + completed.stderr)
+    verify_xml_output(output)
+    print("[OK] Frozen offline XML formatting and PowerShell UTF-16 repair")
 
 
 def write_key(path: Path, key: rsa.RSAPrivateKey) -> None:
@@ -268,6 +310,8 @@ def main() -> int:
 
     host_key = paramiko.RSAKey.generate(2048)
     with tempfile.TemporaryDirectory(prefix="netconf-console2-") as temporary:
+        directory = Path(temporary)
+        run_offline_case(executable, directory)
         paths = make_certificates(Path(temporary))
         tls_context = make_tls_server_context(paths)
         common = ["--connect-timeout", "10", "--reply-timeout", "10"]
@@ -288,6 +332,7 @@ def main() -> int:
             ["--transport", "ssh", "--host", "127.0.0.1", "--port", str(port),
              *ssh_auth, *common],
             lambda: _accept_ssh(listener, host_key),
+            directory / "direct-ssh.xml",
         )
 
         listener, port = listen_loopback()
@@ -297,6 +342,7 @@ def main() -> int:
             ["--transport", "tls", "--host", "127.0.0.1", "--port", str(port),
              *tls_auth, *common],
             lambda: _accept_tls(listener, tls_context),
+            directory / "direct-tls.xml",
         )
 
         port = unused_loopback_port()
@@ -306,6 +352,7 @@ def main() -> int:
             ["--call-home", "--transport", "ssh", "--listen-host", "127.0.0.1",
              "--listen-port", str(port), *ssh_auth, *common],
             lambda: serve_ssh(connect_with_retry(port), host_key),
+            directory / "callhome-ssh.xml",
         )
 
         port = unused_loopback_port()
@@ -316,9 +363,10 @@ def main() -> int:
              "--listen-port", str(port), "--tls-server-name", "localhost",
              *tls_auth, *common],
             lambda: tls_peer(connect_with_retry(port), tls_context),
+            directory / "callhome-tls.xml",
         )
 
-    print("All frozen loopback transport handshakes passed.")
+    print("All frozen loopback handshakes, XML exports and offline formatting passed.")
     return 0
 
 

@@ -16,6 +16,19 @@ from netconf_console.config import get_profile
 
 
 class CliParserTests(unittest.TestCase):
+    def test_pretty_file_options_in_batch_and_interactive_commands(self):
+        parsed = resolve_namespace(argparser().parse_args([
+            "--get-config", "--db", "running", "--pretty", "--out", "running.xml",
+        ]))
+        self.assertEqual(parsed.output, "pretty")
+        self.assertEqual(parsed.out, "running.xml")
+        parser = expression_parser()
+        for command in ("get", "get-config", "get-data", "rpc"):
+            for options in (["--pretty"], ["--output", "pretty"]):
+                parsed = parser.parse_args([command, *options, "--output-file", "result.xml"])
+                self.assertEqual(parsed.command_output, "pretty")
+                self.assertEqual(parsed.out, "result.xml")
+
     def test_new_transport_and_tls_options(self):
         namespace = resolve_namespace(argparser().parse_args([
             "--host", "192.0.2.10", "--port", "6513", "--transport", "tls",

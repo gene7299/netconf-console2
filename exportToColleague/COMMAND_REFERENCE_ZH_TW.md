@@ -295,6 +295,45 @@ netconf-console2 ... --output pretty --trace --trace-file .\logs\session.log
 trace 會遮罩 password、secret leaf 與 credential XML；不要把 private key
 檔案放進 `rpc` 或 debug log。
 
+### Pretty XML 與 UTF-8 直接存檔（3.2.1 起）
+
+`--pretty` 等同 `--output pretty`。使用 `--out`（或 `--output-file`）
+直接保存 UTF-8、無 BOM 的 XML，可避免 PowerShell 5.1 的 `>` 將檔案轉成
+UTF-16，卻保留 `encoding='UTF-8'` 宣告。
+
+```text
+netconf> get-config --db running --pretty --out .\cobra-running-config.xml
+netconf> get --pretty --out .\cobra-all-data.xml
+netconf> get-data --datastore operational --pretty --out .\operational.xml
+netconf> rpc .\request.xml --output pretty --out .\rpc-reply.xml
+netconf> get-config --db running --output raw --out .\running-raw.xml
+```
+
+`get`、`get-config`、`get-data`、`rpc` 支援上述參數；`get-schema --out`
+仍保存 schema 原文。未指定輸出檔案時顯示於畫面，`--out -` 也代表 stdout。
+此命令的格式不會改變其他命令的 `outputformat` 設定。
+
+PowerShell 一次執行查詢並存檔：
+
+```powershell
+.\netconf-console2.exe --host 192.168.9.9 --port 830 --transport ssh `
+  --username oranuser --password --get-config --db running `
+  --pretty --out .\cobra-running-config.xml
+```
+
+已存在的檔案也能離線排版，不必安裝 `xmllint`、Python 或 WSL：
+
+```powershell
+.\netconf-console2.exe --format-xml .\cobra-running-config1.xml `
+  --pretty --out .\cobra-running-config1s.xml
+```
+
+離線模式可處理 UTF-16/32 與宣告不一致的舊檔案；其他不合法的 XML 會報錯。
+來源與輸出檔名不同時會保留來源。輸出檔案若已存在會被覆寫，查詢或解析失敗時
+不會寫入；目錄不存在時會建立。每個輸出檔案限一次查詢，不可把
+`--get --get-config --out FILE` 混在同一次呼叫。Call Home 的等待與連線訊息
+不會混進 `--out` 保存的 XML。
+
 ## 真正修改 `.yang` schema 檔案：沒有直接 NETCONF 對照
 
 這些命令修改的是 Sysrepo server 本機 schema repository，而不是 running 或

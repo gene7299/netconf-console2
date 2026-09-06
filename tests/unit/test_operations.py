@@ -290,6 +290,9 @@ class OperationTests(unittest.TestCase):
         displayed = operations.GetSchema().invoke(Context(), ns(out=None), "demo")
         self.assertIsInstance(displayed, operations.TextResult)
         self.assertIn("namespace 'urn:demo'", displayed.text)
+        stdout = operations.GetSchema().invoke(Context(), ns(out="-"), "demo")
+        self.assertEqual(stdout.text, displayed.text)
+        self.assertNotIn("Saved schema", stdout.text)
 
 
 if __name__ == "__main__":

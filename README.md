@@ -140,6 +140,44 @@ The aliases `user-rpc`, `subscribe`, `notifications`, `watch`, `namespace`, `aut
 `knownhosts`, `cert`, `connect`, `listen`, `disconnect`, `outputformat`,
 `get-data` and `edit-data` are also available in the interactive console.
 
+## Pretty XML and UTF-8 file export
+
+Use `--pretty` (equivalent to `--output pretty`) and `--out FILE` to save an
+indented XML document directly as UTF-8, without a BOM. This avoids Windows
+PowerShell 5.1 rewriting `>` output as UTF-16 while leaving a UTF-8 XML declaration.
+
+```powershell
+.\exportToColleagueEXE\netconf-console2.exe `
+  --host 192.168.9.9 --port 830 --transport ssh --username oranuser --password `
+  --get-config --db running --pretty --out .\cobra-running-config.xml
+```
+
+On an already connected session (including SSH/TLS Call Home):
+
+```text
+get-config --db running --pretty --out .\cobra-running-config.xml
+get --pretty --out .\cobra-all-data.xml
+get-config --db running --output raw --out .\running-raw.xml
+```
+
+`--out` / `--output-file` works with `get`, `get-config`, `get-data`, `rpc` and
+`get-schema`. XML exports contain only the reply, not progress messages. For
+XML exports, existing output files are replaced after a successful query and
+missing parent directories are created. Use one query per output file. A per-command format does not change
+the console's `outputformat` setting. `--out -` writes to stdout.
+
+To format an existing file offline, without connecting to a NETCONF server:
+
+```powershell
+.\exportToColleagueEXE\netconf-console2.exe `
+  --format-xml .\cobra-running-config1.xml --pretty --out .\cobra-running-config1s.xml
+```
+
+The offline formatter also handles UTF-16/32 files with a stale UTF-8 declaration,
+preserving the source when a different output path is used. Invalid XML is
+reported before the output file is written. No Python, WSL or `xmllint` installation
+is needed when using the standalone EXE.
+
 ## Automatic YANG namespaces
 
 On connection, the client learns module-to-namespace mappings from the server

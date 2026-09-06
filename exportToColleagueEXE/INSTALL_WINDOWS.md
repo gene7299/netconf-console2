@@ -62,16 +62,36 @@ certificate、private key、trusted CA、CRL 與 SSH `known_hosts` 是部署資�
 
 ## 已完成的建置端驗證
 
-- 44/44 單元測試
+- 單元測試（包含 pretty XML 與 UTF-8 編碼回歸測試）
 - EXE frozen dependency/CLI 自我檢查
 - Direct SSH：真實 loopback TCP、SSH 與 NETCONF `<hello>`
 - Direct TLS：真實 loopback mTLS 與 NETCONF `<hello>`
 - SSH Call Home：反向 TCP、SSH 與 NETCONF `<hello>`
 - TLS Call Home：反向 TCP、accepted-socket mTLS 與 NETCONF `<hello>`
+- 四種連線模式查詢並保存 UTF-8 pretty XML
+- 離線格式化及 PowerShell UTF-16 輸入轉換
 - 清除 Python PATH 後仍可獨立啟動
 
 Loopback 測試使用臨時帳密、CA 與憑證，不接觸正式 O-RU。正式部署仍應以
 目標設備、實際憑證及網路/Firewall 設定各做一次 interoperability test。
+
+## Pretty XML 與直接存檔
+
+若要直接保存排版好的 UTF-8 XML（3.2.1 起）：
+
+```text
+netconf> get-config --db running --pretty --out .\cobra-running-config.xml
+netconf> get --pretty --out .\cobra-all-data.xml
+```
+
+也可離線排版既有 XML，並修正 PowerShell 重導造成的 UTF-16 編碼問題：
+
+```powershell
+.\netconf-console2.exe --format-xml .\cobra-running-config1.xml `
+  --pretty --out .\cobra-running-config1s.xml
+```
+
+檔案由程式直接以 UTF-8 寫入，不需使用 `>`、`iconv` 或 `xmllint`。
 
 ## `namespaces` 與 `namespaces refresh`
 
