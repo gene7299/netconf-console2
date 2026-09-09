@@ -8,12 +8,13 @@ from tkinter import filedialog, messagebox, ttk
 from ..trace import redact_secrets
 from ..xmloutput import serialize_xml
 from .audit import AuditLog
-from . import lifecycle
+from . import lifecycle, events
+from .advanced import AdvancedFeatures
 from .model import EditError, build_plan, identity
 from .workspace import import_selection, instance_path, search_snapshot, value_changes, xml_diff
 
 
-class WorkspaceFeatures:
+class WorkspaceFeatures(AdvancedFeatures):
     def _build_features(self):
         from .app import XmlPane
         self.audit = AuditLog(persist=self.preferences_store is not None,
@@ -39,7 +40,8 @@ class WorkspaceFeatures:
         bar.pack(fill="x")
         ttk.Label(bar, text="Stream").pack(side="left")
         self.stream = tk.StringVar(self.root, "NETCONF")
-        ttk.Entry(bar, textvariable=self.stream, width=18).pack(side="left", padx=5)
+        self.stream_box = ttk.Combobox(bar, textvariable=self.stream, values=("NETCONF",), width=18)
+        self.stream_box.pack(side="left", padx=5)
         self.subscribe_button = ttk.Button(bar, text="開始訂閱", command=self.subscribe)
         self.subscribe_button.pack(side="left")
         self.stop_subscription_button = ttk.Button(bar, text="停止（中斷連線）", command=self.stop_subscription)
@@ -66,10 +68,13 @@ class WorkspaceFeatures:
         self.editor.text.bind("<Control-f>", lambda _e: (self.search_xml(), "break")[-1])
         self.tree.bind("<Control-f>", lambda _e: (self.search_tree(), "break")[-1])
         self.tree.bind("<F1>", lambda _e: self.show_node_info())
+        self._build_advanced(tools)
 
     def _rpc_allowed(self):
         if self.notification_manager is None:
             return True
+        if not self.client.connected or self.client.manager is not self.notification_manager:
+            return False
         return any(":interleave:" in c for c in self.client.capabilities)
 
     def _sync_features(self):
@@ -86,6 +91,7 @@ class WorkspaceFeatures:
             for widget in (self.read_all_button, self.schema_button, self.refresh_button,
                            self.send_button, self.source_box, self.defaults_check, self.state_check):
                 widget.configure(state="disabled")
+        self._sync_advanced()
 
     def _audit_device(self):
         context = getattr(self.client, "context", None)
@@ -125,6 +131,9 @@ class WorkspaceFeatures:
         self.diff_pane.set("\n".join(lines) + "\n\n" + xml_diff(self.selection.node, self.plan.edited))
 
     def import_xml(self):
+        if self._pending():
+            self.status.set("限時提交尚未結束，暫停匯入草稿。")
+            return
         if self.busy or not self.selection or not self.snapshot:
             self.status.set("請先讀取並選擇要匯入的節點。")
             return
@@ -250,19 +259,34 @@ class WorkspaceFeatures:
         entry.focus_set()
 
     def datastore_action(self, operation):
+        reason = self.action_reason(operation)
+        if reason:
+            self.status.set(reason)
+            return
         if self.busy or self.lifecycle_dialog or not self.client.connected or not self._rpc_allowed():
             return
         if self.dirty or self.uncertain:
             self._error(EditError("請先送出／還原本機草稿，並重新讀取確認設備狀態。"))
             return
         source = self.snapshot.options.source if self.snapshot else self.vars["source"].get()
+        confirm_timeout = 120
+        if operation == "confirmed":
+            from tkinter import simpledialog
+            confirm_timeout = simpledialog.askinteger("限時提交", "幾秒內必須確認保留？（30–600 秒）\n"
+                "逾時由 server 回復；使用 persist token，斷線仍須等待逾時，不會立刻回復。",
+                initialvalue=120, minvalue=30, maxvalue=600, parent=self.root)
+            if confirm_timeout is None:
+                return
         def preview(prepared):
             title = lifecycle.OPERATIONS[operation][0]
             if operation == "compare":
                 self._text_window(title, "唯讀比較（不同權限／default 表示法也可能造成差異）\n\n" + prepared.diff)
                 self.status.set("running / startup 比較完成；沒有修改設備。")
                 return
-            window = self._text_window(title, "整份 datastore 操作，可能包含其他使用者的設定。\n"
+            extra = ("限時提交：%d 秒內需從設定操作選單確認保留或取消；不會自動確認。\n"
+                     "期間保留 running/candidate 鎖；斷線不會立即回復，須等待 server 逾時。\n" % confirm_timeout
+                     if operation == "confirmed" else "")
+            window = self._text_window(title, extra + "整份 datastore 操作，可能包含其他使用者的設定。\n"
                 "預覽只包含目前帳號可讀取的資料；整份操作也可能影響不可見設定。\n"
                 "commit 不會保存 startup；discard 會捨棄整份 candidate 的未提交變更。\n"
                 "送出前會 lock 並重新比對；不會自動重送或復原。\n\n" + prepared.diff + "\n\n實際 RPC:\n" + prepared.wire_xml)
@@ -304,15 +328,20 @@ class WorkspaceFeatures:
             ttk.Button(bar, text="確認送出整份 datastore 操作", command=confirm).pack(side="right")
             window.protocol("WM_DELETE_WINDOW", close)
             self._sync()
-        self._run("準備設定操作預覽…", lambda: lifecycle.prepare(self.client, operation, source), preview)
+        self._run("準備設定操作預覽…", lambda: lifecycle.prepare(self.client, operation, source, confirm_timeout), preview)
 
     def subscribe(self):
-        if self.busy or not self.client.connected or self.notification_manager is not None or self.demo:
+        if self.busy or not self.client.connected or self.notification_manager is not None or self.demo or self._pending():
             return
         if not any(":notification:" in c for c in self.client.capabilities):
             self._error(EditError("Server 不支援 RFC 5277 notifications。"))
             return
         stream = self.stream.get().strip()
+        try:
+            subscription = events.subscription_options(stream, self.streams, self.event_filter_xml, self.event_start, self.event_stop)
+        except Exception as exc:
+            self._error(exc)
+            return
         if not stream:
             self._error(EditError("請輸入 Stream 名稱（預設 NETCONF）。"))
             return
@@ -326,7 +355,7 @@ class WorkspaceFeatures:
             self.reply.set(reply.xml)
             self.notification_status.set("已訂閱 " + stream + ("；可同時讀寫。" if interleave else "；讀寫暫停，停止須中斷連線。"))
             self.output_tabs.select(self.event_frame)
-        self._run("訂閱事件…", lambda: manager.create_subscription(stream_name=stream), done)
+        self._run("訂閱事件…", lambda: manager.create_subscription(**subscription), done)
 
     def stop_subscription(self):
         if self.notification_manager is not None and not self.busy and messagebox.askyesno(
@@ -352,7 +381,11 @@ class WorkspaceFeatures:
                 if len(text) > 65536:
                     text = text[:65536] + "\n[通知過長，已截斷]"
                 self.notifications.append(text)
+                self._record_notification(text)
                 updated = True
+                if self.notification_manager is None:
+                    self._sync()
+                    break
         except Exception:
             # Do not unlock other RPCs: the server may still have an active subscription.
             self.notification_status.set("通知讀取失敗；請中斷連線以結束訂閱。")

@@ -1,5 +1,40 @@
 # Changelog
 
+## 3.6.1 - 2026-09-09
+
+- Placed green NETCONF and red system-sysrepocfg edit buttons side by side in
+  the outgoing XML toolbar, retaining existing confirmation and disabled guards.
+- Added bold, bordered connection tabs with a blue/white selected state using
+  paintable ttk elements so colours also render under the Windows Vista theme.
+
+## 3.6.0 - 2026-09-09
+
+- Added an independent system-SSH/sysrepo tab with explicit connection, separate
+  credentials, host-key verification, optional jump forwarding and DPAPI persistence.
+- Added opt-in administrator editing via sysrepocfg stdin: minimal module-root XML,
+  retained list keys, sysrepo `sr:operation=none` ancestor semantics, preflight
+  comparison and readback; no NACM-rule changes, implicit root fallback or retries.
+- Require explicit same-instance/administrator confirmation; restrict edits to
+  running, retain drafts and require NETCONF refresh after an attempt. Explain the
+  version-dependent stdin `--lock` limitation and possible Call Home disruption.
+- Added synthetic SSH exec/stdin/exit-status/timeout regression coverage for source
+  and frozen GUI; CLI executable and all four NETCONF transports remain independent.
+
+## 3.5.0 - 2026-09-09
+
+- Added capability-gated draft `test-only` validation, structured RPC errors and
+  conservative namespace/key-aware error highlighting in the XML editor.
+- Added Direct SSH jump-host forwarding with independent credentials, host-key
+  verification, DPAPI profile storage and owned-channel cleanup; no external sshpass.
+- Added confirmed-commit 1.1 countdown with unique persist tokens, explicit token-bound
+  confirm/cancel, retained datastore locks and no automatic confirmation/retry.
+- Added versioned DPAPI-encrypted configuration snapshots and opt-in per-change restore
+  staging; backups exclude operational state and are never applied automatically.
+- Added RFC 5277 stream discovery, subtree/replay options, bounded severity/source/time
+  event tables, local filtering and notificationComplete handling.
+- Added disabled-action explanations and expanded synthetic source/frozen regression
+  tests for all four transports, SSH jump forwarding and failure cleanup.
+
 ## 3.4.0 - 2026-09-09
 
 - Added capability-gated explicit startup save, candidate commit/discard, datastore

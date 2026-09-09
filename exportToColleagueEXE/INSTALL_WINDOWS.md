@@ -3,7 +3,10 @@
 此資料夾是 Windows x64 單檔執行版，不包含原始碼、Python wheel、測試或建置
 腳本。同事只需 Windows 10/11；不必安裝 Python、pip 或 Python 相依套件。
 
-## 獨立 GUI（3.4.0）
+## 獨立 GUI（3.6.1）
+
+3.6.1 將「NETCONF方式修改」（綠色）及「使用系統sysrepocfg修改」（紅色）
+並排放到 XML 區工具列，停用時呈灰色；連線設定分頁改為粗體及藍底白字選中狀態。
 
 雙擊 `netconf-console2-gui.exe` 開啟 Windows 視窗；原本
 `netconf-console2.exe` 是 CLI，仍可獨立使用。
@@ -23,6 +26,17 @@ SSH 公鑰認證錯誤與私鑰解密密語的排查步驟見 GUI 操作說明�
 SSH 認證方式與獨立私鑰密碼、搜尋與 YANG 欄位說明、XML 匯入草稿、操作紀錄及事件訂閱。
 操作選單依 server capability 啟用；整份 datastore 操作需要額外確認，不會自動持久化。
 若沿用舊版加密 SSH 私鑰，請到新分頁填寫「私鑰密碼」並儲存設定組。
+
+3.5.0 新增草稿 test-only 驗證、RPC 錯誤定位、Direct SSH 的 VMware 跳板、
+限時確認提交、加密設定備份／勾選差異還原、stream 回放／篩選及告警表格、停用原因。
+限時提交需 server confirmed-commit 1.1；使用 persist token，斷線後仍需等 server 逾時回復。
+`.nccbackup` 只能由原 Windows 帳號／電腦解密；還原只先載入草稿，不自動送出。
+跳板不需要額外安裝 sshpass；TLS 與 Call Home 模式請勿勾選跳板。
+
+3.6.0 新增獨立「系統 SSH／sysrepo」分頁，可用另組 OS 帳號登入 22 port，
+經明確確認將最小 running 變更 XML 送給 sysrepocfg stdin。不會在 NETCONF 拒絕權限時自動改用 root。
+遠端須有 sysrepocfg；Windows 不需安裝它。WSL Docker 情境請確認 SSH port 對應的是 O-RU 容器。
+修改前比對、修改後讀回；不保存 startup，不重送。stdin 模式的 --lock 存在版本差異，詳見操作說明。
 
 ```powershell
 .\netconf-console2-gui.exe

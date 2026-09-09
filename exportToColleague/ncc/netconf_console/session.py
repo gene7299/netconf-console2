@@ -63,6 +63,16 @@ class ConnectionSettings:
     # legacy preserves CLI behaviour; GUI explicitly opts into separated secrets.
     ssh_auth: str = "legacy"
     key_passphrase: str | None = None
+    jump_enabled: bool = False
+    jump_host: str = ""
+    jump_port: int = 22
+    jump_username: str = ""
+    jump_password: str | None = None
+    jump_key: str | None = None
+    jump_passphrase: str | None = None
+    jump_auth: str = "password"
+    jump_verify: bool = True
+    jump_known_hosts: str | None = None
 
     def copy(self, **changes: Any) -> "ConnectionSettings":
         return replace(self, **changes)
@@ -129,6 +139,10 @@ class TracedSSHSession(transport.SSHSession):
         try:
             super().close()
         finally:
+            jump = getattr(self, "_console_jump", None)
+            if jump is not None:
+                jump.close()
+                self._console_jump = None
             if self._console_raw_stream is not None:
                 self._console_raw_stream.close()
                 self._console_raw_stream = None
@@ -419,6 +433,8 @@ def open_direct(
     """Open a direct SSH or TLS manager and return its metadata."""
 
     handler = _handler_for(settings)
+    if settings.jump_enabled and (settings.transport != "ssh" or settings.call_home):
+        raise ValueError("SSH 跳板只適用 Direct SSH。")
     raw_file = settings.raw_file
     session: Any | None = None
     try:
@@ -428,6 +444,11 @@ def open_direct(
         elif settings.transport == "ssh":
             session = TracedSSHSession(handler, trace, raw_file)
             _prepare_known_hosts(session, settings)
+            jump_options = {}
+            if settings.jump_enabled:
+                from .jump import open_jump
+                session._console_jump, jump_channel = open_jump(settings)
+                jump_options["sock"] = jump_channel
             session.connect(
                 host=settings.host,
                 port=settings.port,
@@ -441,6 +462,7 @@ def open_direct(
                 ssh_config=settings.ssh_config,
                 keepalive=settings.keepalive,
                 bind_addr=settings.bind,
+                **jump_options,
             )
         elif settings.transport == "tcp":
             # The historical TCP mode is non-standard and remains only for the
@@ -491,6 +513,8 @@ def open_call_home(
 ) -> tuple[Any, SessionMetadata]:
     """Listen once and establish an SSH or TLS Call Home NETCONF session."""
 
+    if settings.jump_enabled:
+        raise ValueError("SSH 跳板不支援 Call Home；請關閉跳板選項。")
     port = settings.listen_port
     with CallHomeListener(settings.listen_host, port, settings.timeout) as listener:
         listen_address = listener.listen_address or "%s:%s" % (settings.listen_host, port)

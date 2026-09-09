@@ -19,6 +19,7 @@ from lxml import etree
 from netconf_console.gui.client import ReadOptions
 from netconf_console.gui.demo import DemoClient, SOURCES
 from netconf_console.gui.model import NC, WD, WD_YANG, EditPlan
+from netconf_console.gui.events import STREAM_NS
 from netconf_console.session import ConnectionSettings
 
 # Share the well-tested crypto/socket fixture code, not the CLI request loop.
@@ -40,6 +41,11 @@ class Peer:
         self.stores["candidate"].data.find(".//{%s}description" % IF).text = "candidate fixture"
         self.lifecycle_xml = []
         self.locks = set()
+        self.test_xml = ""
+        self.confirmed_token = None
+        self.confirmed_before = None
+        self.subscription_xml = ""
+        self.candidate_edit_xml = ""
 
     def serve(self, stream):
         transport_fixture.recv_until(stream)
@@ -50,7 +56,8 @@ class Peer:
             "urn:ietf:params:netconf:capability:writable-running:1.0",
             "urn:ietf:params:netconf:capability:candidate:1.0",
             "urn:ietf:params:netconf:capability:startup:1.0",
-            "urn:ietf:params:netconf:capability:validate:1.0",
+            "urn:ietf:params:netconf:capability:validate:1.1",
+            "urn:ietf:params:netconf:capability:confirmed-commit:1.1",
             "urn:ietf:params:netconf:capability:notification:1.0",
             "urn:ietf:params:netconf:capability:interleave:1.0",
             "urn:ietf:params:netconf:capability:with-defaults:1.0?basic-mode=explicit&also-supported=report-all,report-all-tagged",
@@ -72,7 +79,14 @@ class Peer:
                 identifier = operation.findtext("{%s}identifier" % MONITORING)
                 etree.SubElement(reply, "{%s}data" % MONITORING).text = SOURCES[identifier]
             elif name in {"get", "get-config"}:
-                if any(etree.QName(node).namespace == LIBRARY for node in operation.iter()):
+                if any(etree.QName(node).namespace == STREAM_NS for node in operation.iter()):
+                    data = etree.SubElement(reply, "{%s}data" % NC)
+                    netconf = etree.SubElement(data, "{%s}netconf" % STREAM_NS)
+                    streams = etree.SubElement(netconf, "{%s}streams" % STREAM_NS)
+                    item = etree.SubElement(streams, "{%s}stream" % STREAM_NS)
+                    for key, value in (("name", "NETCONF"), ("replaySupport", "true"), ("description", "fixture")):
+                        etree.SubElement(item, "{%s}%s" % (STREAM_NS, key)).text = value
+                elif any(etree.QName(node).namespace == LIBRARY for node in operation.iter()):
                     data = etree.SubElement(reply, "{%s}data" % NC)
                     state = etree.SubElement(data, "{%s}modules-state" % LIBRARY)
                     etree.SubElement(state, "{%s}module-set-id" % LIBRARY).text = "gui-fixture"
@@ -95,19 +109,41 @@ class Peer:
                             node.set("{%s}default" % WD_YANG, default)
                     reply.append(data)
             elif name == "edit-config":
-                self.received_edit = request.decode("utf-8")
-                self.demo.apply(None, EditPlan(etree.Element("unused"), rpc, self.received_edit), ReadOptions(defaults=True))
+                if operation.findtext("{%s}test-option" % NC) == "test-only":
+                    assert "running" in self.locks
+                    self.test_xml = request.decode("utf-8")
+                else:
+                    target = etree.QName(operation.find("{%s}target" % NC)[0]).localname
+                    wire = request.decode("utf-8")
+                    if target == "candidate":
+                        self.candidate_edit_xml = wire
+                    else:
+                        self.received_edit = wire
+                    self.stores[target].apply(None, EditPlan(etree.Element("unused"), rpc, wire), ReadOptions(defaults=True))
                 etree.SubElement(reply, "{%s}ok" % NC)
-            elif name in {"copy-config", "commit", "discard-changes", "validate"}:
+            elif name in {"copy-config", "commit", "discard-changes", "validate", "cancel-commit"}:
                 source, target = {"copy-config": ("running", "startup"), "commit": ("candidate", "running"),
-                                  "discard-changes": ("running", "candidate"), "validate": ("running", "running")}[name]
+                                  "discard-changes": ("running", "candidate"), "validate": ("running", "running"),
+                                  "cancel-commit": ("candidate", "running")}[name]
                 assert {source, target}.issubset(self.locks), "Lifecycle must lock both stores"
-                if name != "validate":
+                persist_id = operation.findtext("{%s}persist-id" % NC)
+                if persist_id or name == "cancel-commit":
+                    assert persist_id and persist_id == self.confirmed_token
+                    if name == "cancel-commit":
+                        self.stores["running"].data = self.confirmed_before
+                    self.confirmed_token = None
+                elif operation.find("{%s}confirmed" % NC) is not None:
+                    assert not self.confirmed_token
+                    self.confirmed_token = operation.findtext("{%s}persist" % NC)
+                    self.confirmed_before = deepcopy(self.stores["running"].data)
+                    self.stores["running"].data = deepcopy(self.stores["candidate"].data)
+                elif name != "validate":
                     self.stores[target].data = deepcopy(self.stores[source].data)
                 self.lifecycle_xml.append(request.decode("utf-8"))
                 etree.SubElement(reply, "{%s}ok" % NC)
             elif name == "create-subscription":
                 assert operation.findtext("{urn:ietf:params:xml:ns:netconf:notification:1.0}stream") == "NETCONF"
+                self.subscription_xml = request.decode("utf-8")
                 etree.SubElement(reply, "{%s}ok" % NC)
             elif name in {"lock", "unlock", "close-session"}:
                 if name != "close-session":
@@ -194,9 +230,15 @@ def main():
                 raise AssertionError("Sent XML differs from the GUI preview")
             if peer.lifecycle_xml != report.get("lifecycle_xml") or peer.locks:
                 raise AssertionError("Lifecycle preview/lock mismatch")
-            if peer.operations.count("edit-config") != 1 or not {"lock", "unlock", "get-schema"}.issubset(peer.operations):
+            if peer.test_xml != report.get("test_xml") or peer.confirmed_token is not None:
+                raise AssertionError("Draft test / confirmed token mismatch")
+            if peer.candidate_edit_xml != report.get("candidate_edit_xml"):
+                raise AssertionError("Candidate edit mismatch")
+            if "startTime" not in peer.subscription_xml or "filter" not in peer.subscription_xml:
+                raise AssertionError("Missing replay/subtree subscription")
+            if peer.operations.count("edit-config") != 3 or not {"lock", "unlock", "get-schema"}.issubset(peer.operations):
                 raise AssertionError(peer.operations)
-            print("[OK] %s %s: schema, edit, save/commit/discard/validate, notification and exact wire previews" % (protocol.upper(), "Call Home" if call_home else "Direct"), flush=True)
+            print("[OK] %s %s: schema, test-only, edit, lifecycle, confirmed/cancel tokens, replay/filter and exact wire previews" % (protocol.upper(), "Call Home" if call_home else "Direct"), flush=True)
     return 0
 
 

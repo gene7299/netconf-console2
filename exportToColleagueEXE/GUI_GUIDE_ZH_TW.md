@@ -1,4 +1,8 @@
-# NETCONF Windows GUI 操作說明（3.4.0）
+# NETCONF Windows GUI 操作說明（3.6.1）
+
+3.6.1：實際送出 XML 工具列改為並排的綠色「NETCONF方式修改」與右側紅色
+「使用系統sysrepocfg修改」。不符合送出條件時呈灰色停用；確認與權限檢查維持不變。
+連線設定各分頁以粗體與邊框區隔，目前選中的分頁為藍底白字。
 
 GUI 是獨立的 `netconf-console2-gui.exe`，不取代原本的 CLI
 `netconf-console2.exe`。Windows x64 EXE 已包含 Python、Tk/ttk、ncclient、
@@ -229,7 +233,7 @@ pyang 會處理 augment、uses、choice/case、submodule、feature 與 deviation
 只送出變更節點與定位所需的 ancestor/list key；不整包回送 state 或未變更的 defaults，
 也會移除 `wd:default`／origin 等讀取標記。
 
-按「送出修改…」後會列出變更與移除筆數，確認後才執行：
+按「NETCONF方式修改」後會列出變更與移除筆數，確認後才執行：
 
 1. 鎖定目標 datastore；拿不到 lock 就停止，不強制解鎖別人的 session。
 2. 重新讀取設定並檢查所選內容是否已被其他人修改；若不同則停止，要求重新讀取。
@@ -267,7 +271,7 @@ RPC 成功但讀回／解鎖失敗會標成待確認；請重新連線／讀取�
 **這些是整份 datastore 操作，不是只保存目前 leaf。** candidate 也可能包含同事的
 未提交內容，discard 會一併捨棄。NACM 可能隱藏部分資料；預覽並非不可見資料的保證。
 文字差異也可能來自 namespace prefix、順序或 default 表示法，不是 schema 等價證明。
-GUI 目前不提供 confirmed-commit 倒數回復；修改連線相關設定前請準備帶外恢復方式。
+3.5.0 新增下方說明的 confirmed-commit 倒數回復；修改連線相關設定前仍請準備帶外恢復方式。
 協定語意參考 [RFC 6241](https://www.rfc-editor.org/rfc/rfc6241.html)。
 
 ### 修改差異與搜尋
@@ -306,8 +310,165 @@ RFC 5277 create-subscription。需 server 宣告 `:notification:`；stream 名�
 四種連線方式均使用同一機制；斷線及自動重連後不會自動重訂閱。
 通知僅留記憶體最近 100 筆，每筆最多 65536 字元，過長標示截斷；可另行匯出文字檔。
 只遮蔽常見 password／secret／private-key 欄位，其他自訂敏感資料須自行檢查再分享。
-此版不提供 stream discovery、replay/filter 編輯或 RFC 8639/8640 動態訂閱。
+3.5.0 提供下方說明的 stream discovery 與 replay/filter；尚不提供 RFC 8639/8640 動態訂閱。
 參考 [RFC 5277](https://www.rfc-editor.org/rfc/rfc5277.html)。
+
+## 3.5.0 七項進階功能
+
+### 1. 驗證尚未送出的 XML 草稿
+
+修改右側 XML 後，選「設定操作 → 驗證 XML 草稿（test-only）」。
+需要 server 宣告 `:validate:1.1`；只有 `:validate:1.0` 時會停用，**不降級成真正修改**。
+確認後鎖定目標、比對目前設定與快照，再送出含 `test-option=test-only` 的 edit-config。
+完成解鎖；不套用、不 commit、不保存 startup，草稿仍保留。解鎖失敗則關閉自己的 session。
+它與「驗證 datastore」不同：後者只驗證 server 已有的設定，不包含編輯區草稿。
+測試成功只代表當下通過 server 驗證；真正送出時仍會重新比對。
+
+### 2. RPC 錯誤說明與 XML 定位
+
+錯誤視窗整理 error-tag、error-app-tag、error-path、server 訊息及常見原因；
+右下回應區保留原始 XML。以 error-path 的 namespace 和 list key 定位目前編輯區，
+能唯一對應的節點以紅底標示。路徑缺漏、prefix 未宣告、位置不唯一或節點未顯示時不猜測。
+紅底在重新編輯／載入 XML 時清除；config false 與 default 的既有標色仍保留。
+
+### 3. VMware SSH 跳板（僅 Direct SSH）
+
+上排目的地主機仍填 RU 位址，例如 `192.168.9.9`、port `830`；SSH 認證頁填 **RU 的帳號與密碼**。
+在「SSH 跳板（VMware）」頁勾選啟用，填跳板 host `192.168.142.128`、port `22`、
+跳板帳號 `caper` 及自己的跳板密碼。兩台機器的登入資料分開，不能互換。
+Windows 只需能連到 VMware SSH；VMware 本身必須能透過 USB 網卡到 RU:830，
+且 sshd 允許 direct-tcpip forwarding。工具不會自動修改 VMware 網路或 sshd 設定。
+
+跳板 host key 驗證預設開啟，使用指定 Known hosts 或 `%USERPROFILE%\.ssh\known_hosts`。
+非 22 port 的 host key 名稱為 `[host]:port`。先透過可信管道核對指紋並建立 known_hosts；
+不會自動接受未知 key。RU 的 host key 驗證由原 SSH 認證頁獨立控制。
+私鑰／agent／auto 也可選，跳板私鑰密碼與跳板登入密碼分開。
+跳板設定隨連線設定組加密保存；無密碼 JSON 匯出移除兩種跳板密碼。
+不需要 sshpass、外部 ssh.exe 或另開本機監聽 port，斷線會關閉所屬 tunnel。
+Direct TLS、SSH Call Home、TLS Call Home 請取消跳板選項；這三種模式未改為透過跳板。
+
+### 4. 限時確認提交與倒數
+
+需 `:candidate:1.0` 與 `:confirmed-commit:1.1`。先將草稿明確送入 candidate，
+再選「設定操作 → 限時提交 candidate → running」，輸入 30–600 秒並檢查整份 datastore 預覽。
+確認後才送出 confirmed commit。上、下排之間顯示倒數，可從設定操作選單：
+
+- 「確認保留限時提交」：保留 running；**不保存 startup**。
+- 「取消限時提交／回復」：要求 server 回復提交前 running，再讀回核對。
+
+本工具使用唯一 persist token；後續確認／取消都攜帶 persist-id，避免晚到的確認變成普通 commit。
+**因此斷線不會立即回復：未確認時須等待 server 的 confirm-timeout。**
+倒數不是設備狀態的證明，也無法取代帶外存取。期间保留 running/candidate 鎖，
+暫停其他設定寫入與自動重連；不會自動確認、重送或保存 startup。
+初始 RPC 逾時會標記結果待確認，不能再按確認保留，可嘗試明確取消或等待。
+超過倒數加 RPC timeout 安全等待期後，關閉自己的 session 釋放鎖；請重新連線讀回核對結果。
+程式關閉／崩潰後不會自動恢復 token 或確認；請等待 server timeout，再讀取 running。
+若 server 不支援此 capability，普通 commit 不會自動獲得回復保護。
+
+### 5. 加密設定版本與選擇性還原
+
+「工具 → 建立加密設定備份」重新讀取目前 source 的 config-only 資料，盡量要求 defaults，
+保存為帶時間名稱的 `.nccbackup`。包含版本、UTC 時間、設備端點、source、namespace 與 XML；
+不含 config false 或未送出的本機草稿，也不包含 NACM 隱藏的設定。
+整個檔案由 Windows DPAPI 加密，**只供原 Windows 帳號／電腦使用，不是跨電腦交換格式**。
+寫入採原子替換，不建立明文暫存。請自行管理舊版本；工具不自動刪除備份。
+
+要還原時，先讀取 running/candidate 並選擇目標 subtree，按「工具 → 開啟備份／選擇性還原」。
+核對設備、時間和 source；逐項勾選要還原的差異，預設全部不勾选。
+可查看原值與備份值；新增／移除整個容器或 list instance 視為一個原子項目。
+schema 未知、鍵值／排序不支援或定位不唯一時拒絕，config false 保留目前值。
+確認只會載入編輯區草稿，**仍須自行檢查差異、驗證並按送出**；不自動改動設備。
+備份內省略而現在存在的可寫項目會列為移除，但只有勾選才套用到草稿。
+`.gitignore` 已排除這類備份，避免誤上傳 GitHub。
+
+### 6. Stream discovery、回放與告警表格
+
+「工具 → 事件 streams／篩選／回放」可讀取 server 公布的 stream 清單、description、
+replaySupport 與最早回放時間；伺服器未提供或權限不足時可保留手動輸入的即時 stream。
+回放前須先查到該 stream 支援 replay。startTime / stopTime 使用含時區的 RFC3339，
+如 `2026-09-09T08:00:00+08:00`。startTime 不能是未來，stopTime 需搭配 startTime 且不能較早。
+可輸入通知 payload 的 subtree XML（含正確 namespace，不要包 filter／rpc／notification）。
+「保存條件」不送出，還需按事件通知頁的「開始訂閱」；不會變更既有訂閱。
+實際可回放範圍仍由設備決定；斷線後不自動重訂閱。
+
+「工具 → 告警表格」顯示最近 100 筆事件的時間、severity、來源、事件名稱及選中事件 XML。
+可按 severity 或文字在本機篩選，這不會改變 server subscription。
+解析常見 O-RAN fault-severity/fault-source 與通用欄位；無法辨識時顯示 unknown／原文，
+不是對所有 vendor event schema 的完整解碼器。收到 notificationComplete 才將訂閱標為結束；
+replayComplete 只表示歷史部分播完，不代表即時訂閱停止。
+
+### 7. 停用原因提示
+
+將滑鼠停在主要停用按鈕上會顯示原因。設定操作選單也標示缺少 capability、
+未連線、草稿未處理、結果待確認、訂閱限制或限時提交進行中。
+「設定操作 → 查看功能停用原因」可一次查看狀態。不會为了啟用按鈕而繞過安全檢查。
+
+## 3.6.0 系統 SSH／sysrepocfg 管理員修改
+
+### 適用情境與連線
+
+NETCONF 的 `access-denied` 表示該 NETCONF 帳號未通過授權；不等於系統 SSH 登入失敗。
+這個功能供**已有該機器系統管理授權**的人操作，不會新增 NACM 規則、修改權限，
+也不會在 NETCONF 失敗時暗中改用 root。仍需有效的系統 SSH 帳密／私鑰和 sysrepo 存取權限。
+
+1. 點「顯示連線設定」，打開「系統 SSH／sysrepo」分頁。
+2. Host 預設 `127.0.0.1`、port `22`、帳號 `root`；填入 Docker 模擬 O-RU 的實際系統 SSH 帳密。
+3. 選擇 password／private-key／agent／auto；登入密碼與私鑰密碼分開。
+4. host key 驗證預設開啟；指定 Known hosts 或使用 `%USERPROFILE%\.ssh\known_hosts`。
+   請先核對主機指紋。若在受控本機環境自行取消驗證，SSH 就不會驗證伺服器身分。
+5. 按「連線系統 SSH」。這只建立系統 SSH 連線，不執行修改；「中斷 SSH」不會中斷 NETCONF。
+
+**Windows 的 `127.0.0.1:22` 必須實際轉送到存放該 sysrepo 的 O-RU Docker 容器。**
+若 Docker 公開的是其他 port，請填公開的 port；若 22 是 WSL 主機本身的 sshd，
+登入後執行的 sysrepocfg 可能不是容器裡那一套。工具不會自行 docker exec、sudo 或建立 port forwarding。
+需要中繼主機时，可勾「經 SSH 跳板頁主機」，使用既有跳板頁的連線資料；此時目的地位址從跳板看出去。
+系統 SSH host/port、帳密等隨連線設定組以 DPAPI 保存；無密碼 JSON 匯出不含這兩種系統 SSH 密碼。
+
+### 修改一個 Call Home remote-address
+
+1. NETCONF source 選 running，先讀取設備並載入 YANG。建議在 DATA TREE 選取要改的 remote-address leaf。
+2. 在右側 XML 編輯區修改為 `2000::c5`，檢查最小變更 RPC。不要修改或重送其他帳號／密碼。
+3. 按實際送出 XML 工具列右側的紅色「使用系統sysrepocfg修改」，或「工具 → 系統 SSH／sysrepocfg 修改草稿」。
+4. 預覽會列出 NETCONF 設備、實際系統 SSH 端點、module、讀取／修改命令和 stdin XML。
+5. 確認 OS 帳號有管理授權、兩種連線指向同一台設備的同一個 sysrepo instance，勾選確認後再按執行。
+6. 工具先經系統 SSH 讀取該 module，比對原快照。不同就停止，**不送出修改**。
+7. 比對相符才送一次修改，再經 SSH 讀回核對。不會重送、不保存 startup。
+8. 無論成功或結果不明，都保留編輯內容並要求重新讀取 NETCONF；未重新讀取前不允許再次走此入口。
+
+以此 module 為例，修改命令為：
+
+```sh
+sysrepocfg --edit --datastore running --module ietf-netconf-server --format xml --timeout 10 --lock
+```
+
+程式以 SSH exec 開啟命令，直接將 UTF-8 XML 寫入 stdin 並送 EOF，等同 `< XXX.xml`，
+但不在 Windows 或遠端建立包含設定的臨時 XML，也不需 sshpass 或外部 ssh.exe。
+對話框允許將 sysrepocfg 路徑改成例如 `/usr/local/bin/sysrepocfg`，不接受任意 shell 指令或 sudo。
+遠端 SSH 執行環境須有可用的 sysrepocfg、已安裝的 YANG 及正確的 sysrepo repository。
+
+stdin 是 `netconf-server` 根節點，**不是**整份 `rpc/edit-config/config` envelope，
+也不是只有缺少根祖先的 `call-home`。只包含變更 leaf 和定位用的 `client0`、`ssh-ep0` keys；
+未修改的密碼、remote-port、keepalives 不會帶入。
+sysrepocfg 預設 merge，因此介面將原 RPC 的祖先 `default-operation=none` 轉成
+sysrepo 專用 `sr:operation="none"`（`sr` namespace 為 `http://www.sysrepo.org/yang/sysrepo`），
+而變更 leaf 仍保留 `nc:operation="merge"`。這個 stdin 預覽與原 NETCONF RPC 分開，不能混用。
+參考 [sysrepo metadata 定義](https://github.com/sysrepo/sysrepo/blob/master/modules/sysrepo%402025-04-04.yang)。
+
+### 限制與失敗處理
+
+- 目前只支援 running；不提供候選提交、startup、任意 shell、sudo、docker exec 或 NACM 自動放行。
+- 修改 Call Home 位址可能使目前 NETCONF 或系統 SSH 中斷；不會自動重連系統 SSH或重送。
+  發出此操作時也暫停 NETCONF 自動重連，請手動確認新位址與路由。
+- 讀取、修改、讀回是不同的 sysrepocfg 呼叫，**不是原子 compare-and-swap**。
+  不保證抵擋比對後的其他管理員併發修改。
+- 有些版本只在互動 editor 路徑處理 `--lock`，stdin edit 路徑不會取得該鎖。
+  介面保留使用者指定的 `--lock`，但不宣稱全程鎖定。維護期間請避免其他寫入。
+  版本差異可查 [sysrepocfg 原始碼的 op_edit](https://github.com/sysrepo/sysrepo/blob/master/src/executables/sysrepocfg.c)。
+- 讀取使用 `--defaults explicit` 或 `report-all` 配合 GUI defaults 選項；舊版不支援時會在修改前停止。
+  Namespace／default／順序表示法不同可能造成保守的比對失敗，建議重新讀取並選擇單一 leaf。
+- SSH exit code 非零、命令逾時或連線中斷都不會自動重送。exit=0 但讀回失败／不同會明確標成待確認。
+  關閉 SSH channel 不能保證遠端尚未執行；請核對實際 running 後再操作。
+- 所有測試使用本機合成 SSH peer；未對你的真實 O-RU 執行 sysrepocfg 修改。
 
 ## 測試與建置
 

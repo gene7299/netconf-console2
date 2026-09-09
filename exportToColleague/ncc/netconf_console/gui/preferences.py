@@ -59,6 +59,10 @@ def public_book(book):
     for record in records:
         record.pop("password", None)
         record.pop("key_passphrase", None)
+        record.pop("jump_password", None)
+        record.pop("jump_passphrase", None)
+        record.pop("admin_password", None)
+        record.pop("admin_passphrase", None)
     return result
 
 

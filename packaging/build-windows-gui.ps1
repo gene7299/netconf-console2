@@ -22,6 +22,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "GUI separated SSH authentication tests failed." }
     & py -3 -B tests/integration/gui_reconnect_smoke.py
     if ($LASTEXITCODE -ne 0) { throw "GUI dropped-transport reconnect tests failed." }
+    & py -3 -B tests/integration/gui_jump_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "GUI SSH jump tests failed." }
+    & py -3 -B tests/integration/gui_sysrepo_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "GUI system SSH tests failed." }
     & py -3 -B -m PyInstaller --noconfirm --clean --distpath $OutputDirectory --workpath (Join-Path $WorkDirectory "pyinstaller") (Join-Path $PSScriptRoot "netconf_console2_gui.spec")
     if ($LASTEXITCODE -ne 0) { throw "GUI executable build failed." }
     $guiExe = Join-Path $OutputDirectory "netconf-console2-gui.exe"
@@ -30,10 +34,14 @@ try {
     if ($guiCheck.ExitCode -ne 0) { throw "Frozen GUI self-test failed. See $guiReport" }
     & py -3 -B tests/integration/gui_transport_smoke.py --exe $guiExe
     if ($LASTEXITCODE -ne 0) { throw "Frozen GUI transport tests failed." }
+    & py -3 -B tests/integration/gui_jump_smoke.py --exe $guiExe
+    if ($LASTEXITCODE -ne 0) { throw "Frozen GUI jump tests failed." }
+    & py -3 -B tests/integration/gui_sysrepo_smoke.py --exe $guiExe
+    if ($LASTEXITCODE -ne 0) { throw "Frozen GUI system SSH tests failed." }
     $guiHashes = @(Get-ChildItem -LiteralPath $OutputDirectory -Filter '*.exe' -File | Sort-Object Name | ForEach-Object {
         '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName).Hash, $_.Name
     })
-    [System.IO.File]::WriteAllLines((Join-Path $OutputDirectory 'SHA256SUMS.txt'), $guiHashes, [System.Text.UTF8Encoding]::new($false))
+    [System.IO.File]::WriteAllText((Join-Path $OutputDirectory 'SHA256SUMS.txt'), (($guiHashes -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
     Get-FileHash -LiteralPath $guiExe
 }
 finally {

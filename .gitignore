@@ -33,3 +33,5 @@ gui-settings.dpapi
 .gui-settings-*
 gui-operations.json
 .gui-audit-*
+*.nccbackup
+.nccbackup-*

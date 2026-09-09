@@ -50,6 +50,7 @@ class XmlPane(ttk.Frame):
         self.hbar = self.grid_slaves(row=1, column=1)[0]
         self.text.tag_configure("xml", foreground="#17689b")
         self.text.tag_configure("comment", foreground="#798796")
+        self.text.tag_configure("rpc_error", background="#ffc5c5", underline=True)
         for name, color in COLORS.items():
             self.text.tag_configure(name, background=color)
         self.text.tag_raise("changed")
@@ -106,7 +107,7 @@ class XmlPane(ttk.Frame):
     def syntax(self):
         from .model import XML_TOKEN
         text = self.get()
-        for name in ("xml", "comment", *COLORS):
+        for name in ("xml", "comment", "rpc_error", *COLORS):
             self.text.tag_remove(name, "1.0", "end")
         for match in XML_TOKEN.finditer(text):
             name = "comment" if match.group().startswith("<!--") else "xml"
@@ -178,6 +179,38 @@ class NetconfWindow(WorkspaceFeatures):
         style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"))
         style.configure("Treeview", font=("Segoe UI", 10), rowheight=26)
         style.configure("TButton", padding=(9, 3))
+        # Vista draws native surfaces and ignores colour maps. Use only clam's
+        # paintable border/tab elements, retaining the native theme elsewhere.
+        for name, element in (("Action.Button.border", "Button.border"),
+                              ("Connection.Notebook.tab", "Notebook.tab")):
+            if name not in style.element_names():
+                style.element_create(name, "from", "clam", element)
+        for name, colour, hover, pressed in (
+                ("Netconf.TButton", "#15803d", "#166534", "#14532d"),
+                ("Sysrepo.TButton", "#b91c1c", "#991b1b", "#7f1d1d")):
+            style.layout(name, [("Action.Button.border", {"sticky": "nswe", "children": [
+                ("Button.focus", {"sticky": "nswe", "children": [
+                    ("Button.padding", {"sticky": "nswe", "children": [
+                        ("Button.label", {"sticky": "nswe"})]})]})]})])
+            style.configure(name, background=colour, foreground="white", bordercolor=colour,
+                            lightcolor=colour, darkcolor=colour, font=("Segoe UI", 10, "bold"),
+                            padding=(12, 6), borderwidth=2)
+            style.map(name, background=[("disabled", "#e2e8f0"), ("pressed", pressed), ("active", hover)],
+                      foreground=[("disabled", "#64748b"), ("!disabled", "white")],
+                      bordercolor=[("disabled", "#cbd5e1"), ("focus", "#0f172a")],
+                      lightcolor=[("disabled", "#e2e8f0")], darkcolor=[("disabled", "#e2e8f0")])
+        style.layout("Connection.TNotebook.Tab", [("Connection.Notebook.tab", {"sticky": "nswe", "children": [
+            ("Notebook.padding", {"side": "top", "sticky": "nswe", "children": [
+                ("Notebook.focus", {"side": "top", "sticky": "nswe", "children": [
+                    ("Notebook.label", {"side": "top", "sticky": ""})]})]})]})])
+        style.configure("Connection.TNotebook", tabmargins=(2, 4, 2, 0))
+        style.configure("Connection.TNotebook.Tab", font=("Segoe UI", 10, "bold"),
+                        padding=(12, 7), background="#dbe4ef", foreground="#24364b",
+                        bordercolor="#94a3b8", lightcolor="#94a3b8", darkcolor="#94a3b8")
+        style.map("Connection.TNotebook.Tab",
+                  background=[("selected", "#0969da"), ("active", "#bfdbfe")],
+                  foreground=[("selected", "white"), ("active", "#12345b")],
+                  padding=[("selected", (12, 7))])
         self.vars = {}
         for key, value in {
             "mode": MODES[0], "host": "192.168.9.9", "port": "830",
@@ -272,7 +305,7 @@ class NetconfWindow(WorkspaceFeatures):
         self.disconnect_button = ttk.Button(connection, text="中斷 / 取消等待", command=self.disconnect)
         self.disconnect_button.grid(row=1, column=8, padx=8)
         connection.columnconfigure(3, weight=1)
-        auth = ttk.Notebook(connection)
+        auth = ttk.Notebook(connection, style="Connection.TNotebook")
         auth.grid(row=2, column=0, columnspan=9, sticky="ew", padx=5, pady=(2, 3))
         self.auth_tabs = auth
         ssh, tls, advanced = (ttk.Frame(auth, padding=(4, 2)) for _ in range(3))
@@ -408,7 +441,10 @@ class NetconfWindow(WorkspaceFeatures):
         sendbar = ttk.Frame(bottom)
         sendbar.grid(row=0, column=0, sticky="ew", pady=(9, 3))
         ttk.Label(sendbar, text="實際送出 XML", font=("Segoe UI", 11, "bold")).pack(side="left")
-        self.send_button = ttk.Button(sendbar, text="送出修改…", command=self.send)
+        self.admin_edit_button = ttk.Button(sendbar, text="使用系統sysrepocfg修改",
+                                            style="Sysrepo.TButton", command=self.open_sysrepo)
+        self.admin_edit_button.pack(side="right", padx=4)
+        self.send_button = ttk.Button(sendbar, text="NETCONF方式修改", style="Netconf.TButton", command=self.send)
         self.send_button.pack(side="right", padx=4)
         ttk.Label(bottom, textvariable=self.preview_status, foreground="#925127", wraplength=870).grid(row=1, column=0, sticky="w", pady=(0, 4))
         self.output_tabs = ttk.Notebook(bottom)
@@ -436,6 +472,14 @@ class NetconfWindow(WorkspaceFeatures):
                 # Old profiles must not inherit a secret/auth mode from another account.
                 self.vars["ssh_auth"].set(values.get("ssh_auth", "auto"))
                 self.vars["key_passphrase"].set(values.get("key_passphrase", ""))
+            if "mode" in values:
+                from .admin import ADMIN_DEFAULTS
+                for name, default in ADMIN_DEFAULTS.items():
+                    self.vars[name].set(values.get(name, default))
+                for name in ("jump_host", "jump_username", "jump_password", "jump_key", "jump_passphrase", "jump_known_hosts"):
+                    self.vars[name].set(values.get(name, ""))
+                for name, default in (("jump_enabled", False), ("jump_verify", True), ("jump_port", "22"), ("jump_auth", "password")):
+                    self.vars[name].set(values.get(name, default))
             for name, variable in self.vars.items():
                 value = values.get(name)
                 if type(value) is type(variable.get()):
@@ -669,6 +713,26 @@ class NetconfWindow(WorkspaceFeatures):
             raise ValueError("未知 SSH 認證方式。")
         if not tls and value("ssh_auth") == "private-key" and not key:
             raise ValueError("private-key 認證需要指定私鑰檔案。")
+        jump = {}
+        if value("jump_enabled"):
+            if tls or call_home:
+                raise ValueError("SSH 跳板目前只支援 Direct SSH；其他模式請取消啟用跳板。")
+            if not value("jump_host").strip() or not value("jump_username").strip():
+                raise ValueError("請填入跳板 host 與帳號。")
+            if not 1 <= int(value("jump_port")) <= 65535:
+                raise ValueError("跳板 port 必須介於 1–65535。")
+            if value("jump_auth") not in {"auto", "password", "private-key", "agent"}:
+                raise ValueError("未知跳板認證方式。")
+            jump_key = value("jump_key") if value("jump_auth") in {"auto", "private-key"} else ""
+            if value("jump_auth") == "private-key" and not jump_key:
+                raise ValueError("請指定跳板私鑰。")
+            for filename in (jump_key, value("jump_known_hosts")):
+                if filename and not Path(filename).expanduser().is_file():
+                    raise ValueError("File not found: " + filename)
+            jump = dict(jump_enabled=True, jump_host=value("jump_host").strip(), jump_port=int(value("jump_port")),
+                jump_username=value("jump_username").strip(), jump_password=value("jump_password") or None,
+                jump_key=jump_key or None, jump_passphrase=value("jump_passphrase") or None,
+                jump_auth=value("jump_auth"), jump_verify=value("jump_verify"), jump_known_hosts=value("jump_known_hosts") or None)
         return ConnectionSettings(
             transport="tls" if tls else "ssh", call_home=call_home,
             host=value("host").strip(), port=int(value("port")),
@@ -683,6 +747,7 @@ class NetconfWindow(WorkspaceFeatures):
             tls_version=None if value("tls_version") == "auto" else value("tls_version"),
             netconf_version=None if value("netconf_version") == "auto" else value("netconf_version"),
             timeout=timeout, rpc_timeout=rpc_timeout, bind=value("bind") or None, huge_tree=True,
+            **jump,
         )
 
     def options(self):
@@ -725,7 +790,8 @@ class NetconfWindow(WorkspaceFeatures):
     def _run(self, label, work, done):
         if self.busy:
             return
-        if self.client.connected and not self._rpc_allowed() and label not in {"中斷連線…", "關閉連線…"}:
+        if self.client.connected and not self._rpc_allowed() and label not in {
+                "中斷連線…", "關閉連線…", "連線系統 SSH…", "中斷系統 SSH…", "系統 SSH 修改…"}:
             self.status.set("事件訂閱中且 server 不支援 interleave；請先停止訂閱（中斷連線）。")
             return
         self.busy, self.job_name = True, label
@@ -763,7 +829,11 @@ class NetconfWindow(WorkspaceFeatures):
                 self.progress.stop()
                 if kind == "done":
                     done, result = value
-                    done(result)
+                    try:
+                        done(result)
+                    except Exception as exc:
+                        self.uncertain = True
+                        self._error(exc)
                     if self.closed:
                         return
                     self._audit_result(previous_operation, "完成；結果待確認" if self.uncertain else "完成", previous_device)
@@ -773,7 +843,7 @@ class NetconfWindow(WorkspaceFeatures):
                         # failed. Keep non-interleave RPCs blocked until close.
                         self.notification_manager = self.client.manager
                         self.notification_status.set("訂閱結果待確認；請停止（中斷連線）後再試，不會自動重訂閱。")
-                    if previous_job == "送出修改中…" or previous_job.startswith("設定操作："):
+                    if previous_job in {"送出修改中…", "確認限時提交…", "取消限時提交…", "系統 SSH 修改…"} or previous_job.startswith("設定操作："):
                         self.uncertain = True
                     elif self.snapshot is not None:
                         for name in ("source", "defaults", "state"):
@@ -790,6 +860,7 @@ class NetconfWindow(WorkspaceFeatures):
         except queue.Empty:
             pass
         self._poll_notifications()
+        self._poll_confirmed()
         self._monitor_connection()
         if self.root.winfo_exists():
             self.root.after(80, self._poll)
@@ -850,15 +921,26 @@ class NetconfWindow(WorkspaceFeatures):
 
     def _error(self, exc):
         from ..session import CallHomeCancelled
+        from .rpcerrors import parse_errors, describe_errors, locate_errors
         if isinstance(exc, (InterruptedError, CallHomeCancelled)):
             self.status.set("操作已取消")
             return
-        text = redact_secrets(str(exc))
+        details, raw = parse_errors(exc)
+        text = redact_secrets(describe_errors(details) if details else str(exc))
         self.status.set("操作失敗：" + text[:200])
-        xml = getattr(exc, "xml", None)
-        if isinstance(xml, etree._Element):
-            self.reply.set(serialize_xml(xml).decode("utf-8"))
+        if raw:
+            self.reply.set(raw)
             self.output_tabs.select(self.reply)
+        self.editor.text.tag_remove("rpc_error", "1.0", "end")
+        try:
+            spans = locate_errors(self.editor.get(), self.selection, details) if details else []
+            for start, end in spans:
+                self.editor.text.tag_add("rpc_error", "1.0+%dc" % start, "1.0+%dc" % end)
+            if spans:
+                self.editor.text.tag_raise("rpc_error")
+                self.editor.text.see("1.0+%dc" % spans[0][0])
+        except (EditError, etree.XMLSyntaxError):
+            pass
         if self.uncertain:
             text += "\n\n請先重新讀取確認伺服器結果；不會自動重送。"
         if not self.close_requested:
@@ -892,6 +974,8 @@ class NetconfWindow(WorkspaceFeatures):
             return self.client.read(options)
         def done(snapshot):
             self.demo = False
+            self.streams = {}
+            self.stream_box.configure(values=("NETCONF",))
             self.reconnect_enabled = True
             self.reconnect_delay = 2
             self._accept_snapshot(snapshot)
@@ -901,7 +985,7 @@ class NetconfWindow(WorkspaceFeatures):
 
     def disconnect(self):
         if self.busy:
-            if self.job_name == "送出修改中…" or self.job_name.startswith("設定操作："):
+            if self.job_name in {"送出修改中…", "確認限時提交…", "取消限時提交…", "系統 SSH 修改…"} or self.job_name.startswith("設定操作："):
                 messagebox.showinfo("正在送出", "請等待這次 RPC 完成，避免結果不明。", parent=self.root)
                 return
             self.reconnect_enabled = False
@@ -912,7 +996,7 @@ class NetconfWindow(WorkspaceFeatures):
             # Once the active job finishes, close through the same serial worker.
             self.root.after(150, self._disconnect_when_idle)
             return
-        if not self._discard():
+        if not self._pending_close_allowed() or not self._discard():
             return
         self.reconnect_enabled = False
         self.reconnect_due = None
@@ -1035,6 +1119,8 @@ class NetconfWindow(WorkspaceFeatures):
             return None
 
     def _accept_snapshot(self, snapshot, bookmark=None, *, fresh=True):
+        if fresh:
+            self.admin_requires_refresh = False
         # Capture at completion, not request time: the user may collapse a
         # parent while a background read is still in flight.
         expanded = {self._bookmark(selection) for iid, selection in self.items.items()
@@ -1264,10 +1350,10 @@ class NetconfWindow(WorkspaceFeatures):
         pane.set("\n".join(lines))
 
     def close(self):
-        if self.busy and (self.job_name == "送出修改中…" or self.job_name.startswith("設定操作：")):
+        if self.busy and (self.job_name in {"送出修改中…", "確認限時提交…", "取消限時提交…", "系統 SSH 修改…"} or self.job_name.startswith("設定操作：")):
             messagebox.showinfo("正在送出", "請等待 RPC 完成後再關閉。", parent=self.root)
             return
-        if not self._discard():
+        if not self._pending_close_allowed() or not self._discard():
             return
         if not self._save_preferences(notify=True):
             if not messagebox.askyesno("尚未儲存設定", "設定無法儲存，仍要關閉視窗？原設定檔不會被覆寫。",
@@ -1283,6 +1369,8 @@ class NetconfWindow(WorkspaceFeatures):
             self._run("關閉連線…", self.client.disconnect, lambda _result: self._destroy())
 
     def _destroy(self):
+        if self.admin_connection:
+            self.admin_connection.close()
         self.closed = True
         self.client.cancel.set()
         for callback in self.root.tk.splitlist(self.root.tk.call("after", "info")):
@@ -1308,18 +1396,22 @@ def main(argv=None):
     parser.add_argument("--demo", action="store_true", help="Open safe offline demonstration data; no network")
     parser.add_argument("--self-test", metavar="REPORT_JSON", help="Run GUI/runtime diagnostics without a remote connection")
     parser.add_argument("--loopback-test", metavar="SETTINGS_JSON", help="Developer diagnostic; requires --self-test and a loopback-only test peer")
+    parser.add_argument("--sysrepo-loopback-test", metavar="SETTINGS_JSON", help="Developer diagnostic; synthetic loopback system SSH only")
     args = parser.parse_args(argv)
     if args.loopback_test and not args.self_test:
         parser.error("--loopback-test requires --self-test REPORT_JSON")
+    if args.sysrepo_loopback_test and (not args.self_test or args.loopback_test):
+        parser.error("--sysrepo-loopback-test requires --self-test and cannot combine with --loopback-test")
     set_app_id()
     root = tk.Tk()
     window = NetconfWindow(root, persist=not (args.demo or args.self_test))
     if args.demo:
         window.load_demo()
     if args.self_test:
-        from .diagnostics import self_test, loopback_test
+        from .diagnostics import self_test, loopback_test, sysrepo_loopback_test
         try:
-            report = loopback_test(args.loopback_test) if args.loopback_test else self_test(window)
+            report = (sysrepo_loopback_test(args.sysrepo_loopback_test) if args.sysrepo_loopback_test else
+                      loopback_test(args.loopback_test) if args.loopback_test else self_test(window))
             Path(args.self_test).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
             return 0 if report["passed"] else 1
         finally:

@@ -22,6 +22,15 @@ def self_test(window):
         check("SSH/TLS name verification defaults off", not window.vars["hostkey_verify"].get()
               and not window.vars["verify_hostname"].get())
         check("Pretty button", window.format_button.cget("text") == "Pretty")
+        from tkinter import ttk
+        style = ttk.Style(window.root)
+        check("Separate coloured XML edit actions", window.send_button.cget("text") == "NETCONF方式修改"
+              and window.admin_edit_button.cget("text") == "使用系統sysrepocfg修改"
+              and window.send_button.master is window.admin_edit_button.master
+              and style.lookup("Netconf.TButton", "background", ()) == "#15803d"
+              and style.lookup("Sysrepo.TButton", "background", ()) == "#b91c1c")
+        check("High contrast connection tabs", window.auth_tabs.cget("style") == "Connection.TNotebook"
+              and style.lookup("Connection.TNotebook.Tab", "background", ("selected",)) == "#0969da")
         check("XML export labels and empty-tree guard", window.save_button.cget("text") == "匯出XML"
               and window.save_tree_button.cget("text") == "匯出XML"
               and window.save_tree_button.instate(["disabled"]))
@@ -87,6 +96,22 @@ def self_test(window):
         check("Independent private-key secret and mode", window.vars["ssh_auth"].get() == "auto"
               and window.vars["key_passphrase"].get() == "")
         check("Datastore controls fail closed offline", window.datastore_menu.entrycget(0, "state") == "disabled")
+        from . import backups, safety, events
+        check("Jump settings and disabled explanations", not window.vars["jump_enabled"].get()
+              and window.vars["jump_verify"].get() and bool(window.action_reason("draft")))
+        check("Independent system SSH tab", window.vars["admin_port"].get() == "22"
+              and window.admin_connection is None and window.admin_edit_button.instate(["disabled"]))
+        check("Draft RPC is test-only", safety.draft_rpc(window.plan)[0].findtext("{%s}test-option" % NC) == "test-only")
+        with tempfile.TemporaryDirectory(prefix="netconf-config-backup-test-") as directory:
+            from .client import ReadOptions
+            path = Path(directory) / "snapshot.nccbackup"
+            backups.save_backup(path, window.client.read(ReadOptions(defaults=True)), "synthetic-config-backup", window.client.schema)
+            payload = backups.load_backup(path)
+            check("Frozen DPAPI configuration backup", payload["device"] == "synthetic-config-backup"
+                  and b"synthetic-config-backup" not in path.read_bytes())
+            changes = backups.restore_choices(window.selection, payload["xml"], window.client.schema, "running")
+            check("Frozen selective restore remains local", not changes)
+        check("Notification completion parser", events.event_record('<notification xmlns="%s"><notificationComplete/></notification>' % events.NOTIFICATION_NS).completed)
         result = window.client.apply(window.selection, window.plan, window.snapshot.options)
         check("Offline edit round-trip", result.snapshot.data.find(".//{urn:o-ran:interfaces:1.0}l2-mtu").text == "9000")
         try:
@@ -98,6 +123,43 @@ def self_test(window):
         report["passed"] = True
     except Exception as exc:
         report["error"] = type(exc).__name__ + ": " + str(exc)
+    return report
+
+
+def sysrepo_loopback_test(filename):
+    """Do not use on real devices. Both address and explicit peer marker are checked."""
+    from ..session import ConnectionSettings
+    from . import sysrepo
+    from .client import ReadOptions
+    from .demo import DemoClient
+    from .model import Selection
+    report = {"version": VERSION, "frozen": bool(getattr(sys, "frozen", False)), "passed": False}
+    shell = None
+    try:
+        settings = ConnectionSettings(**json.loads(Path(filename).read_text(encoding="utf-8")))
+        if settings.host not in {"127.0.0.1", "::1"} or settings.call_home or settings.jump_enabled or not 0 < settings.timeout <= 30:
+            raise ValueError("Only direct numeric loopback SSH is allowed for this diagnostic.")
+        shell = sysrepo.ShellConnection(settings)
+        shell.connect()
+        marker, _ = shell.run("sysrepocfg --version", timeout=5)
+        if marker.strip() != b"ncc-synthetic-sysrepo-peer":
+            raise ValueError("Not the marked synthetic sysrepo test peer. No edit sent.")
+        demo = DemoClient()
+        snapshot = demo.read(ReadOptions(defaults=True))
+        selection = Selection(snapshot.data[0][0], (snapshot.data[0],))
+        plan = build_plan(selection, selection.text().replace(">1500<", ">9000<"), demo.schema)
+        prepared = sysrepo.prepare(plan, demo.schema, timeout=1, defaults=True)
+        report["payload"] = prepared.payload.decode("utf-8")
+        report["command"] = prepared.command
+        reply, warnings = sysrepo.execute(shell, prepared, selection, plan, demo.schema, timeout=1, defaults=True)
+        if warnings:
+            raise AssertionError(warnings)
+        report["passed"] = "exit=0" in reply
+    except Exception as exc:
+        report["error"] = type(exc).__name__ + ": " + str(exc)
+    finally:
+        if shell:
+            shell.close()
     return report
 
 
@@ -114,6 +176,8 @@ def loopback_test(filename):
         endpoint = settings.listen_host if settings.call_home else settings.host
         if endpoint not in {"127.0.0.1", "::1"} or settings.timeout <= 0 or settings.timeout > 30:
             raise ValueError("Diagnostic connections require a numeric loopback address and 1–30 second timeout.")
+        if settings.jump_enabled and settings.jump_host not in {"127.0.0.1", "::1"}:
+            raise ValueError("Diagnostic jump host must also be numeric loopback.")
         client.connect(settings)
         if "urn:netconf-console2:gui-test-peer:1.0" not in client.capabilities:
             raise ValueError("This is not the explicitly marked NETCONF GUI test peer.")
@@ -130,6 +194,14 @@ def loopback_test(filename):
         selection = Selection(interface, (interface.getparent(),))
         plan = build_plan(selection, selection.text().replace(">1500<", ">9000<"), client.schema)
         report["checks"].append("Running + defaults + config false retrieval")
+        from . import safety, events
+        test_rpc = safety.draft_rpc(plan)
+        safety.test_draft(client, selection, plan, options, test_rpc)
+        if client.read(options).data.find(".//{urn:o-ran:interfaces:1.0}l2-mtu").text != "1500":
+            raise AssertionError("test-only changed the datastore")
+        from ncclient.xml_ import to_xml
+        report["test_xml"] = to_xml(test_rpc)
+        report["checks"].append("Draft test-only leaves running unchanged")
         result = client.apply(selection, plan, options)
         if result.snapshot is None or result.snapshot.data.find(".//{urn:o-ran:interfaces:1.0}l2-mtu").text != "9000":
             raise AssertionError("Edited value did not round trip")
@@ -144,7 +216,33 @@ def loopback_test(filename):
                 raise AssertionError((operation, warnings))
             report["lifecycle_xml"].append(prepared.wire_xml)
         report["checks"].append("Explicit startup save, candidate commit/discard and datastore validation")
-        client.manager.create_subscription(stream_name="NETCONF")
+        candidate_options = ReadOptions("candidate", True, False)
+        candidate = client.read(candidate_options)
+        interface = candidate.data.find(".//{urn:ietf:params:xml:ns:yang:ietf-interfaces}interface")
+        selection = Selection(interface, (interface.getparent(),))
+        candidate_plan = build_plan(selection, selection.text().replace(">1500<", ">1600<"), client.schema, "candidate")
+        client.apply(selection, candidate_plan, candidate_options)
+        report["candidate_edit_xml"] = candidate_plan.wire_xml
+        for confirm in (False, True):
+            prepared = prepare(client, "confirmed", confirm_timeout=30)
+            reply, warnings = execute(client, prepared)
+            if warnings:
+                raise AssertionError(warnings)
+            if client.read(ReadOptions(defaults=True)).data.find(".//{urn:o-ran:interfaces:1.0}l2-mtu").text != "1600":
+                raise AssertionError("Confirmed commit did not update running")
+            report["lifecycle_xml"].append(prepared.wire_xml)
+            rpc = safety.pending_rpc(client.pending_commit, confirm)
+            reply, warnings = safety.finish_pending(client, client.pending_commit, confirm, rpc)
+            if warnings:
+                raise AssertionError(warnings)
+            expected = "1600" if confirm else "1500"
+            if client.read(ReadOptions(defaults=True)).data.find(".//{urn:o-ran:interfaces:1.0}l2-mtu").text != expected:
+                raise AssertionError("Confirmed cancel/confirm readback mismatch")
+            report["lifecycle_xml"].append(to_xml(rpc))
+        report["checks"].append("Confirmed commit with token-bound explicit cancel and confirmation")
+        streams = events.discover_streams(client.manager)
+        options = events.subscription_options("NETCONF", streams, '<alarm xmlns="urn:fixture"/>', "2026-01-01T00:00:00Z")
+        client.manager.create_subscription(**options)
         notification = client.manager.take_notification(timeout=5)
         if notification is None or "minor" not in notification.notification_xml:
             raise AssertionError("Missing fixture notification")

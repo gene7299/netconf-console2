@@ -83,6 +83,7 @@ class GuiClient:
         self.context: ConsoleContext | None = None
         self.schema = SchemaIndex(complete=False)
         self.cancel = threading.Event()
+        self.pending_commit = None
 
     @property
     def connected(self):
@@ -99,6 +100,11 @@ class GuiClient:
         return [str(cap) for cap in self.manager.server_capabilities]
 
     def connect(self, settings: ConnectionSettings, progress=lambda _text: None):
+        if self.pending_commit is not None:
+            import time
+            if time.monotonic() < self.pending_commit.release_after:
+                raise EditError("前次限時提交仍在等待結束；請稍候，不會自動換 session 確認。")
+            self.pending_commit = None
         self.cancel.clear()
         self.context = ConsoleContext(settings)
         try:
@@ -144,6 +150,8 @@ class GuiClient:
         return Snapshot(deepcopy(reply.data), options, mode, warnings)
 
     def apply(self, selection: Selection, plan: EditPlan, options: ReadOptions) -> ApplyResult:
+        if self.pending_commit is not None:
+            raise EditError("限時提交尚未結束，不能繼續修改。")
         if plan.rpc is None:
             raise EditError("No changes to send.")
         if options.source not in {"running", "candidate"}:

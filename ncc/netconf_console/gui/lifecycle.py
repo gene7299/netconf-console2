@@ -16,10 +16,14 @@ OPERATIONS = {
     "commit": ("提交 candidate → running", "candidate", "running", ":candidate:"),
     "discard": ("捨棄 candidate（恢復為 running）", "running", "candidate", ":candidate:"),
     "validate": ("驗證 datastore", None, None, ":validate:"),
+    "confirmed": ("限時提交 candidate → running", "candidate", "running", ":confirmed-commit:1.1"),
 }
 
 
 def supported(client, operation):
+    if operation == "confirmed":
+        from .safety import has_cap
+        return has_cap(client, "confirmed-commit:1.1") and has_cap(client, "candidate:1.0")
     return operation in OPERATIONS and any(OPERATIONS[operation][3] in c for c in client.capabilities)
 
 
@@ -35,7 +39,9 @@ class PreparedOperation:
     diff: str
 
 
-def prepare(client, operation, source="running"):
+def prepare(client, operation, source="running", confirm_timeout=120):
+    if getattr(client, "pending_commit", None) is not None:
+        raise EditError("限時提交尚未結束。")
     if not supported(client, operation):
         raise EditError("Server 未宣告此操作需要的 capability。")
     _, origin, target, _ = OPERATIONS[operation]
@@ -47,13 +53,19 @@ def prepare(client, operation, source="running"):
     baseline = {name: client.read(ReadOptions(name)).data for name in dict.fromkeys((origin, target))}
     rpc = etree.Element("{%s}rpc" % NC, nsmap={"nc": NC}, attrib={"message-id": "gui-" + uuid.uuid4().hex})
     name = {"save": "copy-config", "compare": "copy-config", "commit": "commit",
-            "discard": "discard-changes", "validate": "validate"}[operation]
+            "discard": "discard-changes", "validate": "validate", "confirmed": "commit"}[operation]
     op = etree.SubElement(rpc, "{%s}%s" % (NC, name))
     if operation in {"save", "compare"}:
         etree.SubElement(etree.SubElement(op, "{%s}target" % NC), "{%s}%s" % (NC, target))
         etree.SubElement(etree.SubElement(op, "{%s}source" % NC), "{%s}%s" % (NC, origin))
     if operation == "validate":
         etree.SubElement(etree.SubElement(op, "{%s}source" % NC), "{%s}%s" % (NC, origin))
+    if operation == "confirmed":
+        if type(confirm_timeout) is not int or not 30 <= confirm_timeout <= 600:
+            raise EditError("限時提交需為 30–600 秒。")
+        etree.SubElement(op, "{%s}confirmed" % NC)
+        etree.SubElement(op, "{%s}confirm-timeout" % NC).text = str(confirm_timeout)
+        etree.SubElement(op, "{%s}persist" % NC).text = uuid.uuid4().hex
     return PreparedOperation(operation, origin, target, baseline, mgr, rpc, to_xml(rpc),
                              xml_diff(baseline[target], baseline[origin], target, origin))
 
@@ -62,6 +74,8 @@ def execute(client, prepared):
     """Never automatically retry. Failure may mean an unknown device outcome."""
     if prepared.operation == "compare":
         raise EditError("比較是唯讀操作。")
+    if getattr(client, "pending_commit", None) is not None:
+        raise EditError("限時提交尚未結束。")
     if client.manager is not prepared.manager or not supported(client, prepared.operation):
         raise EditError("連線已改變；請重新預覽。")
     if to_xml(prepared.rpc) != prepared.wire_xml:
@@ -79,7 +93,12 @@ def execute(client, prepared):
             current = client.read(ReadOptions(name)).data
             if semantic(current) != semantic(baseline):
                 raise EditError(name + " 已在預覽後改變；未送出操作，請重新比較。")
+        if prepared.operation == "confirmed":
+            from .safety import begin_pending
+            begin_pending(client, prepared, locked)
         reply = manager.xrpc(deepcopy(prepared.rpc)).xml
+        if prepared.operation == "confirmed":
+            client.pending_commit.state = "pending"
         if prepared.operation != "validate":
             try:
                 actual = client.read(ReadOptions(prepared.target)).data
@@ -88,7 +107,8 @@ def execute(client, prepared):
             except Exception:
                 warnings.append("RPC 成功，但讀回失敗；結果待確認，不可直接重送。")
     finally:
-        for name in reversed(locked):
+        keep_locks = prepared.operation == "confirmed" and getattr(client, "pending_commit", None) is not None
+        for name in reversed(locked if not keep_locks else []):
             try:
                 manager.unlock(target=name)
             except Exception:

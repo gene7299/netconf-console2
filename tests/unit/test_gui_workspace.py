@@ -88,7 +88,9 @@ class WorkspaceTests(unittest.TestCase):
             with patch("netconf_console.gui.app.filedialog.asksaveasfilename", return_value=str(path)):
                 self.app.export_settings()
             text = path.read_text(encoding="utf-8")
-            self.assertNotIn("password", text)
+            self.assertNotIn('"password":', text)
+            self.assertNotIn('"jump_password":', text)
+            self.assertNotIn('"jump_passphrase":', text)
             self.assertNotIn("old-secret", text)
             self.assertIn("fixture.invalid", text)
             self.assertEqual(json.loads(text)["last"]["values"]["port"], "830")
