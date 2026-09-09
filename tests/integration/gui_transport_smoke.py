@@ -9,6 +9,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+from copy import deepcopy
 from dataclasses import asdict
 from pathlib import Path
 
@@ -35,6 +36,10 @@ class Peer:
         self.demo = DemoClient()
         self.received_edit = ""
         self.operations = []
+        self.stores = {"running": self.demo, "candidate": DemoClient(), "startup": DemoClient()}
+        self.stores["candidate"].data.find(".//{%s}description" % IF).text = "candidate fixture"
+        self.lifecycle_xml = []
+        self.locks = set()
 
     def serve(self, stream):
         transport_fixture.recv_until(stream)
@@ -43,6 +48,11 @@ class Peer:
         for cap in (
             "urn:ietf:params:netconf:base:1.0", "urn:netconf-console2:gui-test-peer:1.0",
             "urn:ietf:params:netconf:capability:writable-running:1.0",
+            "urn:ietf:params:netconf:capability:candidate:1.0",
+            "urn:ietf:params:netconf:capability:startup:1.0",
+            "urn:ietf:params:netconf:capability:validate:1.0",
+            "urn:ietf:params:netconf:capability:notification:1.0",
+            "urn:ietf:params:netconf:capability:interleave:1.0",
             "urn:ietf:params:netconf:capability:with-defaults:1.0?basic-mode=explicit&also-supported=report-all,report-all-tagged",
             "urn:ietf:params:netconf:capability:yang-library:1.1?revision=2019-01-04&content-id=gui-fixture",
         ):
@@ -74,7 +84,9 @@ class Peer:
                     defaults = operation.find("{urn:ietf:params:xml:ns:yang:ietf-netconf-with-defaults}with-defaults") is not None
                     filt = operation.find("{%s}filter" % NC)
                     tag = filt[0].tag if filt is not None and len(filt) else None
-                    data = self.demo.read(ReadOptions(defaults=defaults, state=name == "get"), tag).data
+                    source = operation.find("{%s}source" % NC)
+                    store = self.stores[etree.QName(source[0]).localname] if source is not None else self.demo
+                    data = store.read(ReadOptions(defaults=defaults, state=name == "get"), tag).data
                     # Exercise the libyang/sysrepo spelling, as well as the
                     # RFC spelling covered by the standalone widget self-test.
                     for node in data.iter():
@@ -86,11 +98,32 @@ class Peer:
                 self.received_edit = request.decode("utf-8")
                 self.demo.apply(None, EditPlan(etree.Element("unused"), rpc, self.received_edit), ReadOptions(defaults=True))
                 etree.SubElement(reply, "{%s}ok" % NC)
+            elif name in {"copy-config", "commit", "discard-changes", "validate"}:
+                source, target = {"copy-config": ("running", "startup"), "commit": ("candidate", "running"),
+                                  "discard-changes": ("running", "candidate"), "validate": ("running", "running")}[name]
+                assert {source, target}.issubset(self.locks), "Lifecycle must lock both stores"
+                if name != "validate":
+                    self.stores[target].data = deepcopy(self.stores[source].data)
+                self.lifecycle_xml.append(request.decode("utf-8"))
+                etree.SubElement(reply, "{%s}ok" % NC)
+            elif name == "create-subscription":
+                assert operation.findtext("{urn:ietf:params:xml:ns:netconf:notification:1.0}stream") == "NETCONF"
+                etree.SubElement(reply, "{%s}ok" % NC)
             elif name in {"lock", "unlock", "close-session"}:
+                if name != "close-session":
+                    target = etree.QName(operation.find("{%s}target" % NC)[0]).localname
+                    if name == "lock":
+                        assert target not in self.locks
+                        self.locks.add(target)
+                    else:
+                        self.locks.remove(target)
                 etree.SubElement(reply, "{%s}ok" % NC)
             else:
                 raise AssertionError("Unexpected RPC " + name)
             stream.sendall(etree.tostring(reply) + END)
+            if name == "create-subscription":
+                notification = b'<notification xmlns="urn:ietf:params:xml:ns:netconf:notification:1.0"><eventTime>2026-09-09T00:00:00Z</eventTime><alarm xmlns="urn:fixture"><severity>minor</severity></alarm></notification>'
+                stream.sendall(notification + END)
             if name == "close-session":
                 return
 
@@ -143,6 +176,7 @@ def main():
                 cert=str(certs["client_cert"]), key=str(certs["client_key"]) if protocol == "tls" else None,
                 trusted_ca=str(certs["ca"]), tls_server_name="mismatch.fixture.invalid" if protocol == "tls" else None,
                 verify_hostname=False,
+                ssh_auth="password",
             )
             config = directory / "settings.json"
             report_path = directory / (protocol + ("-callhome" if call_home else "-direct") + ".json")
@@ -158,9 +192,11 @@ def main():
                 raise AssertionError("Loopback peer failed")
             if peer.received_edit != report["wire_xml"]:
                 raise AssertionError("Sent XML differs from the GUI preview")
+            if peer.lifecycle_xml != report.get("lifecycle_xml") or peer.locks:
+                raise AssertionError("Lifecycle preview/lock mismatch")
             if peer.operations.count("edit-config") != 1 or not {"lock", "unlock", "get-schema"}.issubset(peer.operations):
                 raise AssertionError(peer.operations)
-            print("[OK] %s %s: schema, retrieval, exact edit preview and round-trip" % (protocol.upper(), "Call Home" if call_home else "Direct"), flush=True)
+            print("[OK] %s %s: schema, edit, save/commit/discard/validate, notification and exact wire previews" % (protocol.upper(), "Call Home" if call_home else "Direct"), flush=True)
     return 0
 
 

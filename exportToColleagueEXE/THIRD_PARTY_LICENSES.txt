@@ -1,4 +1,4 @@
-THIRD-PARTY NOTICES — Windows GUI 3.3.6 build
+THIRD-PARTY NOTICES — Windows GUI 3.4.0 build
 
 The executable bundles third-party runtimes and libraries. Their original
 notices follow verbatim. This file does not change their licenses.

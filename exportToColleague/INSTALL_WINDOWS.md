@@ -47,7 +47,7 @@ exportToColleague\
 ├── install-netconf-console2.ps1
 ├── run-netconf-console2.ps1
 ├── run-netconf-console2-gui.ps1
-├── netconf_console2-3.3.6-py3-none-any.whl   optional fallback
+├── netconf_console2-3.4.0-py3-none-any.whl   optional fallback
 ├── GUI_GUIDE_ZH_TW.md
 ├── COMMAND_REFERENCE_ZH_TW.md
 ├── INSTALL_WINDOWS.md

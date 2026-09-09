@@ -18,6 +18,8 @@ Push-Location $guiProjectRoot
 try {
     & py -3 -B -m unittest discover -s tests/unit -v
     if ($LASTEXITCODE -ne 0) { throw "Unit tests failed." }
+    & py -3 -B tests/integration/gui_ssh_auth_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "GUI separated SSH authentication tests failed." }
     & py -3 -B tests/integration/gui_reconnect_smoke.py
     if ($LASTEXITCODE -ne 0) { throw "GUI dropped-transport reconnect tests failed." }
     & py -3 -B -m PyInstaller --noconfirm --clean --distpath $OutputDirectory --workpath (Join-Path $WorkDirectory "pyinstaller") (Join-Path $PSScriptRoot "netconf_console2_gui.spec")

@@ -143,7 +143,7 @@ The aliases `user-rpc`, `subscribe`, `notifications`, `watch`, `namespace`, `aut
 ## Native Windows GUI
 
 Version 3.3.0 adds a separate `exportToColleagueEXE/netconf-console2-gui.exe`.
-The CLI remains independent. GUI 3.3.6 includes manageable connection/account history
+The CLI remains independent. GUI 3.4.0 includes manageable connection/account history
 and current-user Windows DPAPI storage, including passwords and last-used fields.
 Both catalogs support search, rename, load-for-edit and confirmed batch deletion.
 Both the XML editor and the complete loaded DATA TREE can be exported as UTF-8 XML.
@@ -166,6 +166,12 @@ exact outgoing edit-config preview. Network and schema work runs in the backgrou
 Writes require complete device schemas, an explicit confirmation and a datastore
 lock/conflict check. State and unknown nodes cannot be written. Only changes and
 required list keys are sent; there is no implicit candidate commit or startup copy.
+The Datastore menu now offers explicit whole-store startup save, candidate commit/discard,
+running/startup comparison and capability-gated validation with locked conflict checks.
+Tools provide staged XML import, instance-path search and YANG field help; the diff tab
+shows old/new values. SSH login passwords and private-key passphrases are separate.
+Bounded metadata-only operation history persists locally. RFC 5277 notifications use
+the active session; without interleave, other RPCs are disabled until disconnect.
 See [the GUI guide](GUI_GUIDE_ZH_TW.md) for connection fields, defaults negotiation,
 limitations and testing. Build with `packaging/build-windows-gui.ps1` after installing
 the project dependencies and PyInstaller. Source launch: `py -3 -m netconf_console.gui.app`.

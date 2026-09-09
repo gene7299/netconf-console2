@@ -3,7 +3,7 @@
 此資料夾是 Windows x64 單檔執行版，不包含原始碼、Python wheel、測試或建置
 腳本。同事只需 Windows 10/11；不必安裝 Python、pip 或 Python 相依套件。
 
-## 獨立 GUI（3.3.6）
+## 獨立 GUI（3.4.0）
 
 雙擊 `netconf-console2-gui.exe` 開啟 Windows 視窗；原本
 `netconf-console2.exe` 是 CLI，仍可獨立使用。
@@ -19,6 +19,10 @@ SSH 公鑰認證錯誤與私鑰解密密語的排查步驟見 GUI 操作說明�
 3.3.4 將連線／開始監聽按鈕加大並改為藍底白字，停用時呈灰色。
 3.3.5 將匯出按鈕改名「匯出XML」，並新增左側整棵 DATA TREE 快照匯出。
 3.3.6 將 DATA TREE「匯出XML」移至「更新 YANG」右側。
+3.4.0 新增明確保存 startup／commit／discard、設定比較／validate、原值新值差異、
+SSH 認證方式與獨立私鑰密碼、搜尋與 YANG 欄位說明、XML 匯入草稿、操作紀錄及事件訂閱。
+操作選單依 server capability 啟用；整份 datastore 操作需要額外確認，不會自動持久化。
+若沿用舊版加密 SSH 私鑰，請到新分頁填寫「私鑰密碼」並儲存設定組。
 
 ```powershell
 .\netconf-console2-gui.exe

@@ -60,6 +60,9 @@ class ConnectionSettings:
     listen_host: str = "0.0.0.0"
     listen_port: int = 4334
     raw_file: str | None = None
+    # legacy preserves CLI behaviour; GUI explicitly opts into separated secrets.
+    ssh_auth: str = "legacy"
+    key_passphrase: str | None = None
 
     def copy(self, **changes: Any) -> "ConnectionSettings":
         return replace(self, **changes)
@@ -99,6 +102,15 @@ class TracedSSHSession(transport.SSHSession):
         if self._console_trace:
             self._console_trace.send(message)
         super().send(message)
+
+    def _auth(self, username, password, key_filenames, allow_agent, look_for_keys):
+        mode = getattr(self, "_console_auth_mode", "legacy")
+        if mode == "legacy":
+            return super()._auth(username, password, key_filenames, allow_agent, look_for_keys)
+        from .sshauth import authenticate
+        return authenticate(self._transport, username, password, key_filenames,
+                            allow_agent, look_for_keys, mode,
+                            getattr(self, "_console_key_passphrase", None))
 
     def _dispatch_message(self, raw: str | bytes) -> Any:
         if self._console_trace:
@@ -394,6 +406,8 @@ def _manager_for_session(session: Any, handler: Any, settings: ConnectionSetting
 
 
 def _prepare_known_hosts(session: Any, settings: ConnectionSettings) -> None:
+    session._console_auth_mode = settings.ssh_auth
+    session._console_key_passphrase = settings.key_passphrase
     if settings.known_hosts:
         session.load_known_hosts(str(Path(settings.known_hosts).expanduser()))
 

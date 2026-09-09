@@ -21,7 +21,8 @@ from ..xmloutput import serialize_xml
 from . import VERSION
 from .client import GuiClient, ReadOptions, Snapshot
 from .model import EditError, Selection, build_plan, children, identity, local, node_style, parse_editor, xml_spans
-from .preferences import PreferencesStore, change_profiles, empty_book, public_book, remember_account, remember_connection
+from .preferences import SSH_FIELDS, PreferencesStore, change_profiles, empty_book, public_book, remember_account, remember_connection
+from .features import WorkspaceFeatures
 from .windows import icon_path, set_app_id
 
 COLORS = {"default": "#fff0bf", "schema_default": "#fff8de", "state": "#e4edf5",
@@ -125,7 +126,7 @@ class XmlPane(ttk.Frame):
                 self.text.tag_add(name, "1.0+%dc" % first, "1.0+%dc" % last)
 
 
-class NetconfWindow:
+class NetconfWindow(WorkspaceFeatures):
     def __init__(self, root: tk.Tk, client=None, *, persist=True, store=None):
         self.root = root
         self.client = client or GuiClient()
@@ -182,6 +183,7 @@ class NetconfWindow:
             "mode": MODES[0], "host": "192.168.9.9", "port": "830",
             "listen_host": "0.0.0.0", "listen_port": "4334", "source": "running",
             "username": "", "password": "", "ssh_key": "", "known_hosts": "",
+            "ssh_auth": "auto", "key_passphrase": "",
             "cert": "", "tls_key": "", "trusted_ca": "", "crl": "", "tls_server_name": "",
             "tls_version": "auto", "timeout": "30", "rpc_timeout": "30", "schema_dir": "",
             "bind": "", "netconf_version": "auto",
@@ -199,6 +201,7 @@ class NetconfWindow:
         self.connection_name = tk.StringVar(root, "")
         self.account_name = tk.StringVar(root, "")
         self._build()
+        self._build_features()
         self._restore_preferences()
         for variable in (*self.vars.values(), self.wrap_xml, self.connection_name, self.account_name):
             variable.trace_add("write", self._schedule_preferences)
@@ -295,6 +298,15 @@ class NetconfWindow:
         ttk.Checkbutton(ssh, text="驗證 SSH host key", variable=self.vars["hostkey_verify"]).grid(row=2, column=3, sticky="w")
         ttk.Checkbutton(ssh, text="SSH agent", variable=self.vars["allow_agent"]).grid(row=2, column=4, sticky="w")
         ttk.Checkbutton(ssh, text="搜尋本機金鑰", variable=self.vars["look_for_keys"]).grid(row=2, column=5, sticky="w")
+        ssh_options = ttk.Frame(auth, padding=(4, 2))
+        auth.add(ssh_options, text="SSH 認證方式 / 私鑰密碼")
+        ttk.Label(ssh_options, text="認證方式").grid(row=0, column=0, padx=7, sticky="w")
+        ttk.Combobox(ssh_options, textvariable=self.vars["ssh_auth"], values=("auto", "password", "private-key", "agent"),
+                     state="readonly", width=18).grid(row=0, column=1, sticky="ew", padx=(0, 9))
+        self._field(ssh_options, "私鑰密碼（passphrase）", "key_passphrase", 0, 2, 23, True)
+        ttk.Label(ssh_options, text="auto：依序嘗試私鑰／本機金鑰／Agent／登入密碼；其他模式只使用指定方法。\n"
+                  "登入密碼及私鑰路徑在 SSH 認證分頁。私鑰密碼不會當登入密碼送出；舊加密私鑰設定請重新填此欄位。"
+                  ).grid(row=1, column=0, columnspan=4, padx=7, pady=4, sticky="w")
         self._path_field(tls, "Client cert", "cert", 0)
         self._path_field(tls, "Private key", "tls_key", 0, 3)
         self._path_field(tls, "Trusted CA", "trusted_ca", 1)
@@ -365,6 +377,9 @@ class NetconfWindow:
         bottom = ttk.Frame(right)
         right.add(top, weight=3)
         right.add(bottom, weight=2)
+        # Notebook pages have different requested heights; keep both XML panes
+        # usable after a window resize instead of letting the tallest tab win.
+        right.bind("<Configure>", lambda event: right.sashpos(0, int(event.height * 0.53)))
         top.rowconfigure(3, weight=1)
         top.columnconfigure(0, weight=1)
         toolbar = ttk.Frame(top)
@@ -417,6 +432,10 @@ class NetconfWindow:
     def _set_preference_values(self, values):
         self.restoring_preferences = True
         try:
+            if "username" in values:
+                # Old profiles must not inherit a secret/auth mode from another account.
+                self.vars["ssh_auth"].set(values.get("ssh_auth", "auto"))
+                self.vars["key_passphrase"].set(values.get("key_passphrase", ""))
             for name, variable in self.vars.items():
                 value = values.get(name)
                 if type(value) is type(variable.get()):
@@ -554,7 +573,7 @@ class NetconfWindow:
         values = self.preferences["connections"].get(self.connection_name.get())
         if values is not None:
             self._set_preference_values(values)
-            account = {key: values[key] for key in ("username", "password", "ssh_key", "allow_agent", "look_for_keys") if key in values}
+            account = {key: values[key] for key in SSH_FIELDS if key in values}
             self.account_name.set(next((name for name, item in self.preferences["accounts"].items() if item == account), ""))
             self._save_preferences()
             self._sync()
@@ -575,8 +594,9 @@ class NetconfWindow:
 
     def new_account(self):
         self.account_name.set("")
-        for name in ("username", "password", "ssh_key"):
+        for name in ("username", "password", "ssh_key", "key_passphrase"):
             self.vars[name].set("")
+        self.vars["ssh_auth"].set("auto")
         self.account_box.focus_set()
 
     def manage_profiles(self, group):
@@ -638,16 +658,23 @@ class NetconfWindow:
         if tls and (not value("cert") or not value("tls_key")):
             raise ValueError("TLS requires a client certificate and private key.")
         key = value("tls_key" if tls else "ssh_key")
+        if not tls and value("ssh_auth") in {"password", "agent"}:
+            key = ""
         for filename in ([key, value("cert"), value("trusted_ca"), value("crl")] if tls else [key, value("known_hosts")]):
             if filename and not Path(filename).expanduser().exists():
                 raise ValueError("File not found: " + filename)
         if not tls and not value("username").strip():
             raise ValueError("SSH username is required.")
+        if not tls and value("ssh_auth") not in {"auto", "password", "private-key", "agent"}:
+            raise ValueError("未知 SSH 認證方式。")
+        if not tls and value("ssh_auth") == "private-key" and not key:
+            raise ValueError("private-key 認證需要指定私鑰檔案。")
         return ConnectionSettings(
             transport="tls" if tls else "ssh", call_home=call_home,
             host=value("host").strip(), port=int(value("port")),
             listen_host=value("listen_host").strip(), listen_port=int(value("listen_port")),
             username=value("username") or None, password=value("password") or None, key=key or None,
+            ssh_auth=value("ssh_auth"), key_passphrase=value("key_passphrase") or None,
             known_hosts=value("known_hosts") or None, hostkey_verify=value("hostkey_verify"),
             allow_agent=value("allow_agent"), look_for_keys=value("look_for_keys"),
             cert=value("cert") or None, trusted_ca=value("trusted_ca") or None,
@@ -693,11 +720,21 @@ class NetconfWindow:
         can_send = (connected and idle and self.plan is not None and self.plan.rpc is not None
                     and not self.uncertain and self.snapshot is not None and self.snapshot.options.source != "startup")
         self.send_button.configure(state="normal" if can_send else "disabled")
+        self._sync_features()
 
     def _run(self, label, work, done):
         if self.busy:
             return
+        if self.client.connected and not self._rpc_allowed() and label not in {"中斷連線…", "關閉連線…"}:
+            self.status.set("事件訂閱中且 server 不支援 interleave；請先停止訂閱（中斷連線）。")
+            return
         self.busy, self.job_name = True, label
+        self.job_device = self._audit_device()
+        self.job_audit_operation = label
+        if label == "送出修改中…" and self.plan and self.snapshot:
+            self.job_audit_operation = "edit-config %s: %d changes / %d removals; %s" % (
+                self.snapshot.options.source, len(self.plan.changes), self.plan.removals,
+                "; ".join(self.plan.changes[:8]))
         self.status.set(label)
         self.progress.start(12)
         self._sync()
@@ -720,6 +757,8 @@ class NetconfWindow:
                     self.status.set(value)
                     continue
                 previous_job = self.job_name
+                previous_device = self.job_device
+                previous_operation = self.job_audit_operation
                 self.busy = False
                 self.progress.stop()
                 if kind == "done":
@@ -727,8 +766,14 @@ class NetconfWindow:
                     done(result)
                     if self.closed:
                         return
+                    self._audit_result(previous_operation, "完成；結果待確認" if self.uncertain else "完成", previous_device)
                 else:
-                    if previous_job == "送出修改中…":
+                    if previous_job == "訂閱事件…" and self.client.connected:
+                        # A lost reply does not prove that create-subscription
+                        # failed. Keep non-interleave RPCs blocked until close.
+                        self.notification_manager = self.client.manager
+                        self.notification_status.set("訂閱結果待確認；請停止（中斷連線）後再試，不會自動重訂閱。")
+                    if previous_job == "送出修改中…" or previous_job.startswith("設定操作："):
                         self.uncertain = True
                     elif self.snapshot is not None:
                         for name in ("source", "defaults", "state"):
@@ -737,12 +782,14 @@ class NetconfWindow:
                         self.status.set("自動重連未成功（%s）；不會重送 XML。" % type(value).__name__)
                     else:
                         self._error(value)
+                    self._audit_result(previous_operation, "失敗／結果待確認：" + type(value).__name__ if self.uncertain else "失敗：" + type(value).__name__, previous_device)
                 if self.close_requested and not self.busy:
                     self._run("關閉連線…", self.client.disconnect, lambda _result: self._destroy())
                     self.close_requested = False
                 self._sync()
         except queue.Empty:
             pass
+        self._poll_notifications()
         self._monitor_connection()
         if self.root.winfo_exists():
             self.root.after(80, self._poll)
@@ -854,7 +901,7 @@ class NetconfWindow:
 
     def disconnect(self):
         if self.busy:
-            if self.job_name == "送出修改中…":
+            if self.job_name == "送出修改中…" or self.job_name.startswith("設定操作："):
                 messagebox.showinfo("正在送出", "請等待這次 RPC 完成，避免結果不明。", parent=self.root)
                 return
             self.reconnect_enabled = False
@@ -878,6 +925,9 @@ class NetconfWindow:
             self._run("中斷連線…", self.client.disconnect, lambda _result: self._clear_connection())
 
     def _clear_connection(self):
+        self.notification_manager = None
+        self.notification_status.set("未訂閱；連線已中斷。")
+        self.diff_pane.set("")
         self.snapshot = self.selection = self.plan = None
         self.items.clear()
         self.tree.delete(*self.tree.get_children())
@@ -1129,6 +1179,7 @@ class NetconfWindow:
                 self.editor.annotate(parse_editor(text), self.selection.path, self.client.schema)
             except Exception:
                 pass
+        self._update_diff()
         self._sync()
 
     def format_editor(self):
@@ -1174,6 +1225,8 @@ class NetconfWindow:
             self._error(exc)
 
     def send(self):
+        if not self.client.connected or not self._rpc_allowed():
+            return
         self._update_preview()
         if not self.plan or self.plan.rpc is None or self.uncertain or self.busy:
             return
@@ -1211,7 +1264,7 @@ class NetconfWindow:
         pane.set("\n".join(lines))
 
     def close(self):
-        if self.busy and self.job_name == "送出修改中…":
+        if self.busy and (self.job_name == "送出修改中…" or self.job_name.startswith("設定操作：")):
             messagebox.showinfo("正在送出", "請等待 RPC 完成後再關閉。", parent=self.root)
             return
         if not self._discard():

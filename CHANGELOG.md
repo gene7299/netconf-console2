@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.4.0 - 2026-09-09
+
+- Added capability-gated explicit startup save, candidate commit/discard, datastore
+  validation and running/startup comparison; preview, locks, conflict rechecks and
+  readback guard whole-datastore operations without implicit retries/persistence.
+- Added keyed old/new value diffs, snapshot tree/path and XML search, and YANG field
+  help with types, typedef constraints, enums, units and descriptions.
+- Added staged selected-subtree XML import with deletion preview, safe parsing,
+  schema/config guards, existing state preservation and no automatic device writes.
+- Separated GUI SSH login passwords/private-key passphrases and explicit auth modes;
+  DPAPI profiles persist both, public exports omit both, legacy CLI behavior remains.
+- Added bounded persistent metadata-only operation history and RFC 5277 event views;
+  subscription without interleave blocks other RPCs; stopping closes the session.
+- Extended source/frozen four-mode loopbacks to lifecycle RPCs and notifications,
+  and Direct/Call Home key-only peers to independently encrypted SSH credentials.
+
 ## 3.3.6 - 2026-09-09
 
 - Move DATA TREE 匯出XML immediately to the right of 更新 YANG in the same

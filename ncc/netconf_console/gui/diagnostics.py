@@ -78,6 +78,15 @@ def self_test(window):
         check("List key included", ">eth0<" in window.preview.get())
         check("Read-only/default metadata excluded from edit", "oper-status" not in window.preview.get() and ("{%s}default" % WD) not in [key for node in window.plan.rpc.iter() for key in node.attrib])
         check("Exact outgoing envelope", etree.fromstring(window.preview.get().encode()).tag == "{%s}rpc" % NC)
+        check("Instance-aware old/new diff", "原值: 1500" in window.diff_pane.get()
+              and "新值: 9000" in window.diff_pane.get() and "name='eth0'" in window.diff_pane.get())
+        from .workspace import search_snapshot, import_selection
+        check("Search includes unexpanded nodes", bool(search_snapshot(window.snapshot.data, window.client.schema, "port-number")))
+        imported = import_selection(etree.tostring(window.snapshot.data), window.selection, window.client.schema)
+        check("Tree XML import remains a local no-op", build_plan(window.selection, etree.tostring(imported).decode(), window.client.schema).rpc is None)
+        check("Independent private-key secret and mode", window.vars["ssh_auth"].get() == "auto"
+              and window.vars["key_passphrase"].get() == "")
+        check("Datastore controls fail closed offline", window.datastore_menu.entrycget(0, "state") == "disabled")
         result = window.client.apply(window.selection, window.plan, window.snapshot.options)
         check("Offline edit round-trip", result.snapshot.data.find(".//{urn:o-ran:interfaces:1.0}l2-mtu").text == "9000")
         try:
@@ -126,6 +135,20 @@ def loopback_test(filename):
             raise AssertionError("Edited value did not round trip")
         report["wire_xml"] = plan.wire_xml
         report["checks"].append("Lock, conflict reread, exact preview edit, unlock, reread")
+        from .lifecycle import prepare, execute
+        report["lifecycle_xml"] = []
+        for operation in ("save", "validate", "commit", "discard"):
+            prepared = prepare(client, operation)
+            reply, warnings = execute(client, prepared)
+            if warnings or "ok" not in reply:
+                raise AssertionError((operation, warnings))
+            report["lifecycle_xml"].append(prepared.wire_xml)
+        report["checks"].append("Explicit startup save, candidate commit/discard and datastore validation")
+        client.manager.create_subscription(stream_name="NETCONF")
+        notification = client.manager.take_notification(timeout=5)
+        if notification is None or "minor" not in notification.notification_xml:
+            raise AssertionError("Missing fixture notification")
+        report["checks"].append("RFC5277 subscription and asynchronous notification")
         report["passed"] = True
     except Exception as exc:
         report["error"] = type(exc).__name__ + ": " + str(exc)

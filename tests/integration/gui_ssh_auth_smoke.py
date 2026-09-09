@@ -29,11 +29,16 @@ def main():
                 return paramiko.AUTH_SUCCESSFUL if username == "fixture" and key == client_key else paramiko.AUTH_FAILED
 
         for call_home in (False, True):
-            for key_path, password, expected_success, label in (
-                (None, "synthetic-password", False, "password rejected with BadAuthenticationType/publickey"),
-                (str(private), None, True, "unencrypted private key accepted with empty password"),
-                (str(private), "synthetic-password", False, "unused password masks unencrypted-key load failure"),
-                (str(encrypted), "synthetic-passphrase", True, "encrypted private key accepted with matching passphrase"),
+            for key_path, password, mode, passphrase, expected_success, label in (
+                (None, "synthetic-password", "legacy", None, False, "legacy password rejected with BadAuthenticationType/publickey"),
+                (str(private), None, "legacy", None, True, "legacy unencrypted private key accepted with empty password"),
+                (str(private), "synthetic-password", "legacy", None, False, "legacy unused password masks unencrypted-key load failure"),
+                (str(encrypted), "synthetic-passphrase", "legacy", None, True, "legacy encrypted key accepted with matching passphrase"),
+                (str(private), "synthetic-password", "auto", None, True, "GUI auto ignores login password when loading unencrypted key"),
+                (str(private), "synthetic-password", "private-key", None, True, "GUI explicit private-key authentication"),
+                (str(encrypted), "different-login-password", "auto", "synthetic-passphrase", True, "GUI encrypted key uses independent passphrase"),
+                (str(encrypted), "synthetic-passphrase", "private-key", "wrong", False, "GUI wrong key passphrase never falls back to login password"),
+                (str(private), "synthetic-password", "password", None, False, "GUI password-only does not silently use selected key"),
             ):
                 listener, port = transport_fixture.listen_loopback()
                 if call_home:
@@ -63,11 +68,16 @@ def main():
                     settings = ConnectionSettings(host="127.0.0.1", port=port, call_home=call_home,
                         listen_host="127.0.0.1", listen_port=port, username="fixture",
                         password=password, key=key_path, allow_agent=False, look_for_keys=False,
+                        ssh_auth=mode, key_passphrase=passphrase,
                         hostkey_verify=False, timeout=8, rpc_timeout=8)
                     try:
                         client.connect(settings)
                     except AuthenticationError as exc:
-                        assert not expected_success and "BadAuthenticationType" in str(exc) and "publickey" in str(exc)
+                        assert not expected_success
+                        if mode == "legacy":
+                            assert "BadAuthenticationType" in str(exc) and "publickey" in str(exc)
+                        else:
+                            assert "私鑰密碼" in str(exc) and "synthetic-passphrase" not in str(exc)
                     else:
                         assert expected_success, "Password must not pass a key-only server"
                         client.read(ReadOptions())

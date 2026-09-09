@@ -37,6 +37,9 @@ class NodeInfo:
     defaults: tuple[str, ...] = ()
     description: str = ""
     ordered_by_user: bool = False
+    type_name: str = ""
+    constraints: str = ""
+    units: str = ""
 
 
 def _text(node, name):
@@ -219,10 +222,33 @@ class SchemaIndex:
             desc = stmt.search_one("description")
             order = stmt.search_one("ordered-by")
             mod = getattr(stmt, "i_main_module", stmt.i_module)
+            type_stmt = stmt.search_one("type")
+            type_name = type_stmt.arg if type_stmt is not None else ""
+            constraints = []
+            visited_types = set()
+            current_type = type_stmt
+            units = stmt.search_one("units")
+            while current_type is not None and id(current_type) not in visited_types:
+                visited_types.add(id(current_type))
+                for restriction in current_type.substmts:
+                    if restriction.keyword in {"range", "length", "pattern", "enum", "bit", "path", "base", "fraction-digits", "type"}:
+                        constraints.append("%s: %s" % (restriction.keyword, restriction.arg))
+                typedef = getattr(current_type, "i_typedef", None)
+                if typedef is None:
+                    break
+                if units is None:
+                    units = typedef.search_one("units")
+                current_type = typedef.search_one("type")
+                if current_type is not None:
+                    constraints.append("base type: " + current_type.arg)
+            for restriction in stmt.substmts:
+                if restriction.keyword in {"must", "when", "mandatory", "min-elements", "max-elements"}:
+                    constraints.append("%s: %s" % (restriction.keyword, restriction.arg))
             result.nodes[path] = NodeInfo(
                 path, mod.arg, stmt.keyword, getattr(stmt, "i_config", None),
                 keys, tuple(defaults), desc.arg if desc is not None else "",
                 order is not None and order.arg == "user",
+                type_name, "\n".join(constraints), units.arg if units is not None else "",
             )
             for child in getattr(stmt, "i_children", []):
                 walk(child, path)

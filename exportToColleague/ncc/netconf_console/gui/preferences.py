@@ -11,7 +11,7 @@ from pathlib import Path
 from ..config import config_dir
 
 MAGIC = b"NCCGUI-DPAPI\x01"
-SSH_FIELDS = ("username", "password", "ssh_key", "allow_agent", "look_for_keys")
+SSH_FIELDS = ("username", "password", "ssh_key", "allow_agent", "look_for_keys", "ssh_auth", "key_passphrase")
 VIEW_FIELDS = {"source", "defaults", "state", "wrap_xml", "connection_hidden", "auto_reconnect"}
 
 
@@ -58,6 +58,7 @@ def public_book(book):
     records += list(result["connections"].values()) + list(result["accounts"].values())
     for record in records:
         record.pop("password", None)
+        record.pop("key_passphrase", None)
     return result
 
 

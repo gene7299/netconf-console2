@@ -1,4 +1,4 @@
-# NETCONF Windows GUI 操作說明（3.3.6）
+# NETCONF Windows GUI 操作說明（3.4.0）
 
 GUI 是獨立的 `netconf-console2-gui.exe`，不取代原本的 CLI
 `netconf-console2.exe`。Windows x64 EXE 已包含 Python、Tk/ttk、ncclient、
@@ -120,19 +120,24 @@ DPAPI 通常限定同一 Windows 使用者與電腦解密；請勿把設定檔�
 方式不被允許；不等同密碼打錯，也不是 SSH host key 驗證錯誤。
 見 [Paramiko 認證例外說明](https://docs.paramiko.org/en/stable/api/ssh_exception.html)。
 
-本版沿用既有認證流程，沒有放寬伺服器安全策略。已在合成的本機 Direct SSH
-和 SSH Call Home 公鑰限定伺服器重現以下情況：
+GUI 3.4.0 將登入密碼與私鑰密碼分開，沒有放寬伺服器安全策略。
+「SSH 認證方式 / 私鑰密碼」分頁選擇 `auto`、`password`、`private-key` 或 `agent`。
+只有 auto 會採用 SSH 認證頁的 Agent／搜尋勾選；其他模式只嘗試指定方法。
+已在合成的本機 Direct SSH 和 SSH Call Home 公鑰限定伺服器驗證：
 
 | GUI 認證欄位 | 結果／處理方式 |
 |---|---|
 | 只有帳號與登入密碼 | 公鑰限定伺服器不接受；需選擇已授權的 SSH 私鑰 |
 | 正確且未加密的 SSH 私鑰，密碼空白 | 可公鑰認證 |
-| 未加密私鑰，但密碼仍填著登入密碼 | 目前 ncclient/Paramiko 會把密碼用於私鑰解密；載入失敗後回退密碼，可能得到相同錯誤。請清空密碼再試 |
-| 正確且加密的 SSH 私鑰 | 密碼欄需填該私鑰的解密密語（passphrase），不是設備登入密碼 |
+| 未加密私鑰，但登入密碼仍有值 | GUI auto／private-key 不會拿登入密碼解密私鑰；私鑰密碼留白即可 |
+| 正確且加密的 SSH 私鑰 | 在「私鑰密碼（passphrase）」填解密密語；登入密碼可與它不同 |
+| password 模式且有選私鑰 | 只嘗試登入密碼，不會默默改用公鑰 |
 
-目前函式庫依序嘗試指定私鑰、SSH agent、本機金鑰、密碼；最後一個失敗訊息可能
-遮住先前金鑰載入／認證失敗的原因。切換連線組會恢復該組完整認證快照，所以
-請核對目前帳號、Private key 與密碼欄。亦應確認 host／port／Call Home 呼入設備
+GUI auto 依序嘗試指定私鑰、本機金鑰、SSH Agent、登入密碼。錯誤會說明失敗階段，
+不輸出密碼內容。舊設定的私鑰密碼不會自動猜測搬移：加密私鑰使用者需填新欄位並儲存。
+CLI 保留原本 ncclient 相容流程，因此舊 CLI 私鑰／password 行為不變。
+切換連線組會恢復該組完整認證快照，所以請核對目前帳號、Private key 與兩種密碼。
+亦應確認 host／port／Call Home 呼入設備
 是否一致；若預期伺服器接受密碼，需查設備該帳號的 SSH／NETCONF 認證政策及日誌。
 僅憑這則錯誤無法確定現場是哪個原因，也不應據此關閉 host key 驗證。
 
@@ -141,7 +146,7 @@ DPAPI 通常限定同一 Windows 使用者與電腦解密；請勿把設定檔�
 「進階 / YANG schema」頁提供兩個按鈕，皆包含目前尚未儲存的欄位、既存連線
 設定組及 SSH 帳號組；不會讀取或匯出 NETCONF server 的 running XML。
 
-- **匯出設定 JSON（不含密碼）**：UTF-8 可讀檔，所有 password 欄位均移除。
+- **匯出設定 JSON（不含密碼）**：UTF-8 可讀檔，所有 password、key_passphrase 欄位均移除。
   仍含帳號、主機、IP、設定組名稱及本機路徑，分享前請自行檢查；這是參考設定，
   不是 CLI TOML，也不支援直接匯入 GUI。
 - **匯出加密備份（含密碼）**：完整 DPAPI 設定備份，只適合原 Windows 使用者／
@@ -236,9 +241,73 @@ lock、檢查用 get-config 和 unlock 是額外的保護 RPC；右下主要預�
 NETCONF 錯誤可能在不支援 rollback 的設備上留下部分套用結果，因此不能以
 「回覆錯誤」推定伺服器完全沒變更。
 
-**running 修改不會自動保存 startup；candidate 修改不會自動 commit。
-startup 在此 GUI 只供讀取。** 若要 commit 或 copy-config，請用既有 CLI
-的明確命令執行。GUI 不會替你隱含做持久化。
+**running 修改不會自動保存 startup；candidate 修改不會自動 commit。**
+startup 的 XML 編輯仍唯讀，但可透過下列明確保存操作更新；不會隱含做持久化。
+
+## 3.4.0 設定操作、搜尋、匯入與紀錄
+
+### 設定操作選單
+
+最上方「設定操作」提供：
+
+| 操作 | 效果／capability |
+|---|---|
+| 保存 running → startup | copy-config 整份設定；需要 `:startup:` |
+| 比較 running / startup | 唯讀讀取兩份設定，顯示差異；需要 `:startup:` |
+| 提交 candidate → running | commit 整份 candidate；需要 `:candidate:`；不會保存 startup |
+| 捨棄 candidate | discard-changes，整份 candidate 回到 running；需要 `:candidate:` |
+| 驗證 datastore | validate 目前讀取的 source；需要 `:validate:`；不是驗證尚未送出的草稿 |
+
+不支援、未連線、忙碌、有未送出草稿或結果待確認時，相關選項會停用。
+先送出／還原草稿並重新讀取，再操作。比較／預覽不會修改設備。
+按確認才鎖定相關 datastore、重新比對預覽快照、送出所示 RPC、讀回及解鎖。
+快照已改變或 lock 失敗就停止，不強制解鎖他人，不自動重送。
+RPC 成功但讀回／解鎖失敗會標成待確認；請重新連線／讀取，不要重送。
+
+**這些是整份 datastore 操作，不是只保存目前 leaf。** candidate 也可能包含同事的
+未提交內容，discard 會一併捨棄。NACM 可能隱藏部分資料；預覽並非不可見資料的保證。
+文字差異也可能來自 namespace prefix、順序或 default 表示法，不是 schema 等價證明。
+GUI 目前不提供 confirmed-commit 倒數回復；修改連線相關設定前請準備帶外恢復方式。
+協定語意參考 [RFC 6241](https://www.rfc-editor.org/rfc/rfc6241.html)。
+
+### 修改差異與搜尋
+
+右下「修改差異」即時列出 target、含 module／list key 的 instance 路徑、原值、新值，
+並附 XML diff（含新增、移除）。這裡顯示真實值，分享畫面前請檢查敏感資料。
+「工具 → 搜尋 DATA TREE / 路徑」搜尋目前完整快照，即使節點尚未展開也可找到。
+支援名稱、module-qualified 路徑、值、description 的不分大小寫文字搜尋，最多 500 筆；
+雙擊跳到 instance，只顯示快照，不暗中發 RPC；需要最新值再按重新讀取。
+「工具 → 搜尋編輯區 XML」或 Ctrl+F 標示符合文字（最多 5000 筆）。
+「工具 → 所選節點 YANG 說明」或 DATA TREE 的 F1 顯示型別、default、單位、enum、
+range、length、pattern、must／when 與 typedef 限制。完整 YANG 語意仍由 server 驗證。
+
+### XML 匯入（不是立即還原整台設備）
+
+先讀取 running/candidate、選擇要套用的節點，再按「工具 → 匯入 XML 到選取節點」。
+接受選取 subtree，或 DATA TREE 匯出的 data、config、含 data 的 rpc-reply。
+完整 data 檔只擷取與目前選取路徑、namespace、list key 唯一吻合的 instance；其他根不動。
+上限 32 MiB，拒絕 DTD、entity、操作 RPC 及手寫 nc:operation。
+會檢查 schema、可寫性與結構，忽略檔案的 config false 並保留目前唯讀值；未知欄位拒絕。
+**選取 subtree 內，檔案省略的可寫節點視為刪除。** 載入前會顯示移除筆數，取消保留草稿。
+載入只改本機編輯區；請核對「修改差異」和「待送出 RPC」，再按送出。
+這不是完整離線 YANG validate；type、leafref、must 等最終有效性以 server 回覆為準。
+
+### 操作紀錄與事件通知
+
+「操作紀錄」保留最近 500 筆 UTC 時間、設備端點、操作名稱、修改筆數／部分欄位路徑、
+完成／失敗類型，可匯出 JSON。正常模式跨次啟動保存於
+`%USERPROFILE%\.netconf-console2\gui-operations.json`；demo／自我測試不寫個人紀錄。
+不保存 XML、leaf 值、登入密碼或私鑰密碼；仍含端點資訊。它是操作摘要，不是完整 wire trace。
+
+「事件通知」輸入 stream 名稱（預設 NETCONF），按「開始訂閱」使用目前 session 的
+RFC 5277 create-subscription。需 server 宣告 `:notification:`；stream 名稱由設備提供。
+若沒有 `:interleave:`，確認訂閱後會停用其他讀写 RPC，避免違反 session 限制。
+「停止（中斷連線）」會確認後關閉 session（RFC 5277 沒有通用 unsubscribe RPC）。
+四種連線方式均使用同一機制；斷線及自動重連後不會自動重訂閱。
+通知僅留記憶體最近 100 筆，每筆最多 65536 字元，過長標示截斷；可另行匯出文字檔。
+只遮蔽常見 password／secret／private-key 欄位，其他自訂敏感資料須自行檢查再分享。
+此版不提供 stream discovery、replay/filter 編輯或 RFC 8639/8640 動態訂閱。
+參考 [RFC 5277](https://www.rfc-editor.org/rfc/rfc5277.html)。
 
 ## 測試與建置
 
