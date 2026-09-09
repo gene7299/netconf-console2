@@ -16,6 +16,7 @@ EXE、測試、Git metadata、PyInstaller 建置檔或 Python cache。
 ```powershell
 .\install-netconf-console2.ps1
 .\run-netconf-console2.ps1 --interactive
+.\run-netconf-console2-gui.ps1
 ```
 
 安裝腳本會建立本資料夾專用的 `.venv`，並從這份原始碼執行 `pip install`。
@@ -45,18 +46,24 @@ exportToColleague\
 ├── requirements-runtime.txt   runtime dependency list
 ├── install-netconf-console2.ps1
 ├── run-netconf-console2.ps1
-├── netconf_console2-3.2.1-py3-none-any.whl   optional fallback
+├── run-netconf-console2-gui.ps1
+├── netconf_console2-3.3.6-py3-none-any.whl   optional fallback
+├── GUI_GUIDE_ZH_TW.md
 ├── COMMAND_REFERENCE_ZH_TW.md
 ├── INSTALL_WINDOWS.md
 ├── LICENSE.txt
 └── SHA256SUMS.txt
 ```
 
-Runtime dependencies 包含 `ncclient`、`paramiko`、`lxml`、`prompt-toolkit`
+Runtime dependencies 包含 `ncclient`、`paramiko`、`lxml`、`prompt-toolkit`、`pyang`
 及其遞迴相依套件。若目標電腦完全離線，必須另外準備與目標 Python 版本和
 Windows 架構相符的 wheelhouse；只有 application wheel 並不足以離線安裝。
 
 ## 四種連線方式
+
+GUI 同樣支援以下四種模式。使用包含 Tcl/Tk 的 Windows Python，執行
+`run-netconf-console2-gui.ps1` 後填寫上排連線欄位；預設來源是 running。
+完整操作與安全限制請看 [GUI_GUIDE_ZH_TW.md](GUI_GUIDE_ZH_TW.md)。
 
 Direct SSH：
 

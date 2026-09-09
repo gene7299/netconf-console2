@@ -1,0 +1,5 @@
+# Exported source is a byte-for-byte delivery bundle with SHA256SUMS.txt.
+# Do not rewrite its line endings during a Windows Git checkout.
+/exportToColleague/** -text
+/exportToColleague/*.whl binary
+/exportToColleagueEXE/*.exe binary

@@ -29,3 +29,5 @@ htmlcov/
 *.pfx
 certs/
 logs/
+gui-settings.dpapi
+.gui-settings-*

@@ -1,5 +1,71 @@
 # Changelog
 
+## 3.3.6 - 2026-09-09
+
+- Move DATA TREE 匯出XML immediately to the right of 更新 YANG in the same
+  toolbar, preserving export behavior and compact-window visibility.
+
+## 3.3.5 - 2026-09-09
+
+- Rename the editor's UTF-8 export button to 匯出XML without changing encoding.
+- Add DATA TREE XML export for the whole loaded snapshot, including collapsed
+  branches and the defaults/state actually retrieved, excluding unsent editor changes.
+  Export never fetches or writes server data and is disabled without a snapshot or while busy.
+
+## 3.3.4 - 2026-09-09
+
+- Enlarge the GUI connect/listen primary action with bold white text on blue,
+  visible keyboard focus and grey disabled state, independent of Windows ttk theme.
+- Preserve compact-window XML space and existing connection/disabled behavior.
+
+## 3.3.3 - 2026-09-09
+
+- Added searchable connection/SSH-account managers with load-for-edit, collision-safe
+  rename and confirmed multi-select deletion, persisted atomically via DPAPI.
+- Stop recreating deleted catalog entries at close; retain independent last fields.
+  Update explicitly selected history records and ignore view-only differences when
+  matching anonymous connections. Existing user records are not auto-deleted.
+- Added isolated catalog/UI/restart/failure tests and publickey-only SSH diagnostics
+  documenting password-versus-private-key-passphrase behavior without changing auth policy.
+
+## 3.3.2 - 2026-09-09
+
+- Added password-free JSON settings export and full current-user DPAPI backups
+  under the advanced GUI tab; exports include current fields and saved profiles.
+- Fixed tree indicator clicks triggering selection/reread; preserve expanded and
+  collapsed branches across asynchronous refresh, including hidden selections.
+- Added a persistent collapsible connection panel and opt-in automatic transport
+  reconnect/Call Home re-listen with capped backoff, cancellation and draft retention.
+  Reconnect never replays writes and requires fresh device data before sending.
+- Set Windows AppUserModelID and native default window icons; ship the same icon
+  in source/wheel packages as in the independent GUI executable.
+- Added native widget, export, reconnect safety and real four-mode dropped-peer tests.
+
+## 3.3.1 - 2026-09-09
+
+- Added selectable GUI connection snapshots and independent SSH account history,
+  named saves, automatic last-field restoration and Windows current-user DPAPI
+  encryption for settings/passwords, without a plaintext fallback.
+- Defaulted GUI SSH host-key and TLS hostname verification to unchecked; removed
+  the unchecked SSH connection warning while retaining TLS CA-chain validation.
+- Removed the GUI workspace banner and renamed the formatting button to Pretty.
+- Isolated demo/self-tests from personal settings and added encrypted persistence,
+  restart, account-switching, corrupt-file and frozen-DPAPI regression tests.
+
+## 3.3.0 - 2026-09-08
+
+- Added a separate native Windows GUI executable with Direct SSH/TLS and
+  SSH/TLS Call Home settings, background operations and cancellation.
+- Added running-first expandable data browsing, device YANG compilation/cache,
+  explicit defaults/state options and metadata-aware XML colours.
+- Added live minimal edit-config previews with ancestor list keys, write guards,
+  explicit confirmation, locking/conflict checks and no implicit persistence.
+- Added an offline demo, GUI widget/model tests and source/frozen four-transport
+  loopbacks that compare preview XML with the actual request received by the peer.
+- Verified read-only SSH interoperability with the local NETCONF server, including
+  strict get-schema identityrefs, disabled-feature grouping expansion and the
+  libyang/sysrepo with-defaults metadata spelling.
+
 ## 3.2.1 - 2026-09-06
 
 - Added `--out` / `--output-file` for get, get-config, get-data and raw RPC

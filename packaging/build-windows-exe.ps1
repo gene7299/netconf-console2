@@ -44,8 +44,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "A frozen Direct/Call Home SSH/TLS loopback handshake failed."
 }
 
-$hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
-$checksumLines = @("$hash  netconf-console2.exe")
+$checksumLines = @(Get-ChildItem -LiteralPath $dist -Filter '*.exe' -File | Sort-Object Name | ForEach-Object {
+    '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash, $_.Name
+})
 [System.IO.File]::WriteAllLines(
     $checksums,
     $checksumLines,

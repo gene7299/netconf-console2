@@ -3,6 +3,29 @@
 此資料夾是 Windows x64 單檔執行版，不包含原始碼、Python wheel、測試或建置
 腳本。同事只需 Windows 10/11；不必安裝 Python、pip 或 Python 相依套件。
 
+## 獨立 GUI（3.3.6）
+
+雙擊 `netconf-console2-gui.exe` 開啟 Windows 視窗；原本
+`netconf-console2.exe` 是 CLI，仍可獨立使用。
+GUI 預設讀取 running，支援 Direct SSH/TLS 與 SSH/TLS Call Home、YANG 樹狀選單、
+default/state/變更標色與實際修改 RPC 預覽。
+詳見 [GUI_GUIDE_ZH_TW.md](GUI_GUIDE_ZH_TW.md)。
+3.3.1 新增連線／SSH 帳號清單與加密密碼保存；重新開啟會恢復上次設定。
+SSH host key 與 TLS 名稱驗證預設不勾選，TLS 憑證鏈驗證仍保留。
+3.3.2 新增進階頁設定匯出、連線區收合與自動重連，修正樹狀折疊及工作列圖示。
+自動重連不重送修改 XML；恢復連線後需重新讀取才能送出。
+3.3.3 新增兩種設定組的管理／搜尋／重新命名／批次刪除，避免關閉視窗時重新加入。
+SSH 公鑰認證錯誤與私鑰解密密語的排查步驟見 GUI 操作說明。
+3.3.4 將連線／開始監聽按鈕加大並改為藍底白字，停用時呈灰色。
+3.3.5 將匯出按鈕改名「匯出XML」，並新增左側整棵 DATA TREE 快照匯出。
+3.3.6 將 DATA TREE「匯出XML」移至「更新 YANG」右側。
+
+```powershell
+.\netconf-console2-gui.exe
+# 無設備的離線示範（不連線、不修改 RU）
+.\netconf-console2-gui.exe --demo
+```
+
 ## 先做離線自我檢查
 
 在 PowerShell 進入本資料夾後執行：
@@ -117,9 +140,12 @@ Get-Content .\SHA256SUMS.txt
 ## 本資料夾應只有
 
 - `netconf-console2.exe`
+- `netconf-console2-gui.exe`
 - `INSTALL_WINDOWS.md`
+- `GUI_GUIDE_ZH_TW.md`
 - `COMMAND_REFERENCE_ZH_TW.md`
 - `LICENSE.txt`
+- `THIRD_PARTY_LICENSES.txt`
 - `SHA256SUMS.txt`
 
 完整命令與 YANG 修改範例請參考 `COMMAND_REFERENCE_ZH_TW.md`。

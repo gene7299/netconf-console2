@@ -5,8 +5,8 @@ from setuptools import find_packages, setup
 
 setup(
     name="netconf-console2",
-    version="3.2.1",
-    description="Windows-native NETCONF CLI for O-RAN O-RU management-plane testing",
+    version="3.3.6",
+    description="Windows-native NETCONF CLI and GUI for O-RAN O-RU management-plane testing",
     packages=find_packages("ncc"),
     package_dir={"": "ncc"},
     python_requires=">=3.10",
@@ -15,9 +15,14 @@ setup(
         "paramiko>=3.2.0",
         "lxml>=4.9.0",
         "prompt-toolkit>=3.0,<4",
+        "pyang>=2.7,<3",
         "tomli>=2.0.0; python_version < '3.11'",
     ],
     extras_require={"interactive": []},
-    entry_points={"console_scripts": ["netconf-console2=netconf_console.ncc:main"]},
+    entry_points={
+        "console_scripts": ["netconf-console2=netconf_console.ncc:main"],
+        "gui_scripts": ["netconf-console2-gui=netconf_console.gui.app:main"],
+    },
     include_package_data=True,
+    package_data={"netconf_console.gui": ["assets/*.ico"]},
 )
