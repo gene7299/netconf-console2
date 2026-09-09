@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.7.0 - 2026-09-09
+
+- Add schema-driven child/root creation forms, required/key field seeds, nested
+  container/list/leaf-list creation and optional DATA TREE candidate hints.
+- Retain effective choice/case, presence, mandatory, min/max and compiled type
+  metadata; check local types and conflicts while leaving XPath/NACM to the server.
+- Preserve existing XML drafts; new data uses explicit create, with absent-root
+  conflict detection in NETCONF, test-only and system-sysrepocfg workflows.
+- Add offline model/native-widget/frozen creation regression coverage. No automatic
+  writes, commits, startup persistence or replacement of existing list instances.
+
+## 3.6.2 - 2026-09-09
+
+- Default system-SSH host-key verification to unchecked for the new admin tab.
+- Make the system-SSH connect action blue while idle and green after connection;
+  widen NETCONF, jump-host and system-SSH password fields.
+- Rename the jump-host tab to `SSH跳板` and make the running Source / Target default
+  explicit in the connection panel.
+
 ## 3.6.1 - 2026-09-09
 
 - Placed green NETCONF and red system-sysrepocfg edit buttons side by side in

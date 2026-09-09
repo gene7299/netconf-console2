@@ -1,4 +1,44 @@
-# NETCONF Windows GUI 操作說明（3.6.1）
+# NETCONF Windows GUI 操作說明（3.7.0）
+
+3.7.0：新增 schema 範本表單、可新增節點提示及整個根節點不存在時的建立入口。
+
+## 建立尚未存在的節點／list 項目
+
+1. 連線並讀取 running（或 candidate），確認 YANG schema 載入完整。
+2. 例如已有 `ietf-netconf-server:netconf-server`，但沒有 `call-home`：
+   選取 `netconf-server`，按 DATA TREE 下的「新增子節點…」，選擇 `call-home`。
+   若連 `netconf-server` 都沒有，按「新增根節點…」選它。
+3. 表單左側列出目前這一層的 schema 候選；可搜尋名稱／module／說明。
+   灰色項目會說明不可新增的原因（已存在、config false、達到上限、另一分支已存在）。
+4. 右側選取 container，使用下方候選清單和「新增子節點／項目」逐層建立：
+   例如 `call-home → netconf-client → endpoints → endpoint`，再選設備 schema
+   提供的 SSH 或 TLS 分支。list 的 key、mandatory 與 min-elements 欄位會產生待填提示。
+   **新增另一筆 list 時，選取 list 的父容器，再新增一次相同 list 類型**，填不同 key。
+5. 選取 leaf 填值後按「套用欄位值」（Enter 亦可）；boolean／enumeration／identityref
+   提供候選值。可新增可選欄位，也可移除範本節點；缺少必填欄位時不能完成。
+   不會自動選擇互斥 choice 分支，不會填造主機、密碼、金鑰等值。
+6. 按「加入 XML 草稿」只合併進右上 XML，保留該選取範圍既有修改；右下顯示實際 RPC。
+   確認後才使用「NETCONF方式修改」或「使用系統sysrepocfg修改」送出。
+   不會自動 commit candidate 或保存 startup；「還原」可放棄新根節點草稿。
+
+勾選「顯示可新增節點」後，DATA TREE 會以灰色 `＋` 顯示候選，雙擊可開啟表單。
+提示來自 schema 與上次讀取的資料，不是設備實際資料；不會混入 DATA TREE XML 匯出。
+**未讀到不保證不存在**：可能是 NACM 過濾、隱含 default 或 when 條件。
+新增使用 `nc:operation="create"`，遇到設備已存在的同名節點／相同 list key 會拒絕，
+不會默默覆寫；既有 leaf 修改仍用 merge，刪除仍用 remove。送出前會再次讀取比對。
+
+範本依設備載入的有效 schema（含 feature、augment、deviation）產生。
+本機檢查必填欄位、list key、重複項目、數量、choice 分支與編譯型別限制；
+完整 `when`／`must`／leafref 的資料引用、`unique`、權限及裝置特殊限制仍由伺服器驗證。
+可先用「測試草稿」的 test-only（需 `:validate:1.1`）；不支援時不會降級為實際寫入。
+範本只自動建立必需結構；選取有 default 的 leaf 時才帶入建議值，不會灌入整棵預設資料。
+anyxml／anydata 不提供結構化範本。範本預覽可能含密碼，分享或匯出前請自行遮蔽。
+
+---
+
+3.6.2：系統 SSH host key 驗證預設不勾選；「連線系統 SSH」閒置時為藍色，
+連線成功後改為綠色。NETCONF、SSH 跳板與系統 SSH 登入密碼欄位已加寬；跳板分頁名稱為「SSH跳板」。
+Source / Target 初次開啟預設為 `running`。
 
 3.6.1：實際送出 XML 工具列改為並排的綠色「NETCONF方式修改」與右側紅色
 「使用系統sysrepocfg修改」。不符合送出條件時呈灰色停用；確認與權限檢查維持不變。
@@ -334,7 +374,7 @@ RFC 5277 create-subscription。需 server 宣告 `:notification:`；stream 名�
 ### 3. VMware SSH 跳板（僅 Direct SSH）
 
 上排目的地主機仍填 RU 位址，例如 `192.168.9.9`、port `830`；SSH 認證頁填 **RU 的帳號與密碼**。
-在「SSH 跳板（VMware）」頁勾選啟用，填跳板 host `192.168.142.128`、port `22`、
+在「SSH跳板」頁勾選啟用，填跳板 host `192.168.142.128`、port `22`、
 跳板帳號 `caper` 及自己的跳板密碼。兩台機器的登入資料分開，不能互換。
 Windows 只需能連到 VMware SSH；VMware 本身必須能透過 USB 網卡到 RU:830，
 且 sshd 允許 direct-tcpip forwarding。工具不會自動修改 VMware 網路或 sshd 設定。

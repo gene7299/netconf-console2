@@ -85,6 +85,7 @@ class Selection:
     """Snapshot node plus all ancestors needed to address a deep list leaf."""
     node: etree._Element
     ancestors: tuple[etree._Element, ...] = ()
+    exists: bool = True
 
     @property
     def path(self):
@@ -141,8 +142,10 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
         raise EditError("Keep the selected root name and namespace unchanged.")
     if target not in {"running", "candidate", "startup"}:
         raise EditError("Unsupported edit target.")
-    if semantic(before) == semantic(edited):
+    if selection.exists and semantic(before) == semantic(edited):
         return plan
+    if not selection.exists and selection.ancestors:
+        raise EditError("Only a root creation can use an absent baseline.")
     if not schema.complete:
         raise EditError("YANG schemas are incomplete. Load/refresh the device schemas before editing.")
 
@@ -203,9 +206,11 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
             return output
         check_structure(new, info)
         if old is None:
+            from .creation import validate_subtree
+            validate_subtree(schema, new, path)
             added(new, path)
             output = _copy_clean(new)
-            output.set("{%s}operation" % NC, "merge")
+            output.set("{%s}operation" % NC, "create")
             plan.changes.append("ADD " + label)
             return output
         if info.kind in {"leaf", "leaf-list"}:
@@ -255,7 +260,7 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
         parent = schema.lookup(selection.path[:-1])
         if parent and before.tag in parent.keys:
             raise EditError("List key leaves are identifiers and cannot be edited in place.")
-    fragment = difference(before, edited, selection.path)
+    fragment = difference(before if selection.exists else None, edited, selection.path)
     if fragment is None:
         return plan
     for index in range(len(selection.ancestors) - 1, -1, -1):

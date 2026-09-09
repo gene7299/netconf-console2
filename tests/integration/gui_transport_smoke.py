@@ -42,6 +42,8 @@ class Peer:
         self.lifecycle_xml = []
         self.locks = set()
         self.test_xml = ""
+        self.creation_xml = ""
+        self.creation_test_xml = ""
         self.confirmed_token = None
         self.confirmed_before = None
         self.subscription_xml = ""
@@ -109,14 +111,20 @@ class Peer:
                             node.set("{%s}default" % WD_YANG, default)
                     reply.append(data)
             elif name == "edit-config":
+                creating = any(n.get("{%s}operation" % NC) == "create" for n in operation.iter())
                 if operation.findtext("{%s}test-option" % NC) == "test-only":
                     assert "running" in self.locks
-                    self.test_xml = request.decode("utf-8")
+                    if creating:
+                        self.creation_test_xml = request.decode("utf-8")
+                    else:
+                        self.test_xml = request.decode("utf-8")
                 else:
                     target = etree.QName(operation.find("{%s}target" % NC)[0]).localname
                     wire = request.decode("utf-8")
                     if target == "candidate":
                         self.candidate_edit_xml = wire
+                    elif creating:
+                        self.creation_xml = wire
                     else:
                         self.received_edit = wire
                     self.stores[target].apply(None, EditPlan(etree.Element("unused"), rpc, wire), ReadOptions(defaults=True))
@@ -234,11 +242,13 @@ def main():
                 raise AssertionError("Draft test / confirmed token mismatch")
             if peer.candidate_edit_xml != report.get("candidate_edit_xml"):
                 raise AssertionError("Candidate edit mismatch")
+            if peer.creation_xml != report.get("creation_xml") or peer.creation_test_xml != report.get("creation_test_xml"):
+                raise AssertionError("Create / create test-only preview mismatch")
             if "startTime" not in peer.subscription_xml or "filter" not in peer.subscription_xml:
                 raise AssertionError("Missing replay/subtree subscription")
-            if peer.operations.count("edit-config") != 3 or not {"lock", "unlock", "get-schema"}.issubset(peer.operations):
+            if peer.operations.count("edit-config") != 5 or not {"lock", "unlock", "get-schema"}.issubset(peer.operations):
                 raise AssertionError(peer.operations)
-            print("[OK] %s %s: schema, test-only, edit, lifecycle, confirmed/cancel tokens, replay/filter and exact wire previews" % (protocol.upper(), "Call Home" if call_home else "Direct"), flush=True)
+            print("[OK] %s %s: schema, test-only, edit, root create, lifecycle, confirmed/cancel tokens, replay/filter and exact wire previews" % (protocol.upper(), "Call Home" if call_home else "Direct"), flush=True)
     return 0
 
 

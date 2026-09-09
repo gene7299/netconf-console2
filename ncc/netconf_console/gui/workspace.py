@@ -74,7 +74,7 @@ def value_changes(selection, edited, schema):
                 walk(child, (*ancestors, node))
         walk(root, selection.ancestors)
         return result
-    old, new = flatten(selection.node), flatten(edited)
+    old, new = flatten(selection.node) if selection.exists else {}, flatten(edited)
     return [ValueChange(path, old.get(path, "（不存在）"), new.get(path, "（移除）"))
             for path in dict.fromkeys((*old, *new))
             if path not in old or path not in new or old[path] != new[path]]

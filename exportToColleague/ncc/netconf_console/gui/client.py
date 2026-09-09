@@ -78,6 +78,20 @@ def config_semantic(node, path, schema):
     return node.tag, tuple(value for value in values if value is not None)
 
 
+def check_selection_current(data, selection, schema):
+    if not selection.exists:
+        if selection.ancestors:
+            raise EditError("An absent baseline must be a root node.")
+        wanted = identity(selection.node, schema, selection.path)
+        if any(identity(n, schema, selection.path) == wanted for n in children(data)
+               if n.tag == selection.node.tag):
+            raise EditError("The new instance already exists on the server. Reload before sending.")
+        return
+    latest = locate(data, selection, schema)
+    if config_semantic(latest, selection.path, schema) != config_semantic(selection.node, selection.path, schema):
+        raise EditError("Configuration changed on the server since this read. Reload before sending.")
+
+
 class GuiClient:
     def __init__(self):
         self.context: ConsoleContext | None = None
@@ -174,9 +188,7 @@ class GuiClient:
             manager.lock(target=options.source)
             locked = True
             current = self.read(ReadOptions(options.source, options.defaults, False), selection.path[0])
-            latest = locate(current.data, selection, self.schema)
-            if config_semantic(latest, selection.path, self.schema) != config_semantic(selection.node, selection.path, self.schema):
-                raise EditError("Configuration changed on the server since this read. Reload before sending.")
+            check_selection_current(current.data, selection, self.schema)
             reply = manager.xrpc(deepcopy(plan.rpc))
             reply_xml = reply.xml
         finally:

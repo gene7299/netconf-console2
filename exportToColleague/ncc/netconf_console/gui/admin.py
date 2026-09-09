@@ -10,7 +10,7 @@ from .model import EditError
 
 ADMIN_DEFAULTS = {"admin_host": "127.0.0.1", "admin_port": "22", "admin_username": "root",
     "admin_password": "", "admin_key": "", "admin_passphrase": "", "admin_auth": "password",
-    "admin_known_hosts": "", "admin_verify": True, "admin_jump": False,
+    "admin_known_hosts": "", "admin_verify": False, "admin_jump": False,
     "admin_program": "sysrepocfg", "admin_timeout": "10"}
 
 
@@ -25,7 +25,7 @@ class AdminFeatures:
         self._field(page, "SSH host", "admin_host", 0, 0, 17)
         self._field(page, "Port", "admin_port", 0, 2, 5)
         self._field(page, "系統帳號", "admin_username", 0, 4, 11)
-        self._field(page, "登入密碼", "admin_password", 0, 6, 12, True)
+        self.admin_password_entry = self._field(page, "登入密碼", "admin_password", 0, 6, 22, True)
         ttk.Combobox(page, textvariable=self.vars["admin_auth"], values=("password", "private-key", "agent", "auto"),
             state="readonly", width=11).grid(row=0, column=8, padx=3)
         self._path_field(page, "Private key", "admin_key", 1, 0).configure(width=15)
@@ -35,7 +35,15 @@ class AdminFeatures:
         self._field(page, "sysrepocfg 路徑", "admin_program", 2, 0, 17)
         self._field(page, "Timeout 秒", "admin_timeout", 2, 2, 5)
         ttk.Checkbutton(page, text="經 SSH 跳板頁主機", variable=self.vars["admin_jump"]).grid(row=2, column=4, columnspan=2)
-        self.admin_connect_button = ttk.Button(page, text="連線系統 SSH", command=self.connect_admin)
+        self.admin_connect_button = tk.Button(
+            page, text="連線系統 SSH", command=self.connect_admin,
+            font=("Segoe UI", 10, "bold"), padx=10, pady=3,
+            background="#0969da", foreground="#ffffff",
+            activebackground="#0756b3", activeforeground="#ffffff",
+            disabledforeground="#ffffff", relief="flat", borderwidth=0,
+            highlightthickness=1, highlightbackground="#1d4ed8",
+            cursor="hand2", takefocus=True,
+        )
         self.admin_connect_button.grid(row=2, column=6)
         self.admin_disconnect_button = ttk.Button(page, text="中斷 SSH", command=self.disconnect_admin)
         self.admin_disconnect_button.grid(row=2, column=7)
@@ -72,7 +80,21 @@ class AdminFeatures:
     def _sync_admin(self):
         online = bool(self.admin_connection and self.admin_connection.connected)
         idle = not self.busy and not self.lifecycle_dialog
-        self.admin_connect_button.configure(state="normal" if idle and not online else "disabled")
+        if online:
+            self.admin_connect_button.configure(
+                text="系統 SSH 已連線", state="disabled", background="#16a34a",
+                activebackground="#15803d", highlightbackground="#15803d",
+                cursor="arrow", disabledforeground="#ffffff")
+        elif idle:
+            self.admin_connect_button.configure(
+                text="連線系統 SSH", state="normal", background="#0969da",
+                activebackground="#0756b3", highlightbackground="#1d4ed8",
+                cursor="hand2", disabledforeground="#ffffff")
+        else:
+            self.admin_connect_button.configure(
+                text="連線系統 SSH", state="disabled", background="#e2e8f0",
+                activebackground="#e2e8f0", highlightbackground="#cbd5e1",
+                cursor="arrow", disabledforeground="#64748b")
         self.admin_disconnect_button.configure(state="normal" if idle and self.admin_connection else "disabled")
         ready = (idle and online and not self.demo and self.selection is not None and self.snapshot is not None
                  and self.snapshot.options.source == "running" and self.plan is not None and self.plan.rpc is not None

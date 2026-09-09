@@ -7,7 +7,7 @@ import uuid
 from lxml import etree
 from ncclient.xml_ import to_xml
 
-from .client import ReadOptions, config_semantic, locate
+from .client import ReadOptions, check_selection_current
 from .model import EditError, NC
 
 
@@ -48,9 +48,7 @@ def test_draft(client, selection, plan, options, rpc):
         manager.lock(target=options.source)
         locked = True
         current = client.read(ReadOptions(options.source, options.defaults, False), selection.path[0])
-        latest = locate(current.data, selection, client.schema)
-        if config_semantic(latest, selection.path, client.schema) != config_semantic(selection.node, selection.path, client.schema):
-            raise EditError("Server 設定已改變，請重新讀取。未送出測試。")
+        check_selection_current(current.data, selection, client.schema)
         return manager.xrpc(deepcopy(rpc)).xml
     finally:
         if locked:

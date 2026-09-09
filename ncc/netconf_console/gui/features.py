@@ -10,11 +10,12 @@ from ..xmloutput import serialize_xml
 from .audit import AuditLog
 from . import lifecycle, events
 from .advanced import AdvancedFeatures
+from .creation_ui import CreationFeatures
 from .model import EditError, build_plan, identity
 from .workspace import import_selection, instance_path, search_snapshot, value_changes, xml_diff
 
 
-class WorkspaceFeatures(AdvancedFeatures):
+class WorkspaceFeatures(CreationFeatures, AdvancedFeatures):
     def _build_features(self):
         from .app import XmlPane
         self.audit = AuditLog(persist=self.preferences_store is not None,
@@ -69,6 +70,7 @@ class WorkspaceFeatures(AdvancedFeatures):
         self.tree.bind("<Control-f>", lambda _e: (self.search_tree(), "break")[-1])
         self.tree.bind("<F1>", lambda _e: self.show_node_info())
         self._build_advanced(tools)
+        self._build_creation(tools)
 
     def _rpc_allowed(self):
         if self.notification_manager is None:
@@ -92,6 +94,7 @@ class WorkspaceFeatures(AdvancedFeatures):
                            self.send_button, self.source_box, self.defaults_check, self.state_check):
                 widget.configure(state="disabled")
         self._sync_advanced()
+        self._sync_creation()
 
     def _audit_device(self):
         context = getattr(self.client, "context", None)

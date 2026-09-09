@@ -3,7 +3,15 @@
 此資料夾是 Windows x64 單檔執行版，不包含原始碼、Python wheel、測試或建置
 腳本。同事只需 Windows 10/11；不必安裝 Python、pip 或 Python 相依套件。
 
-## 獨立 GUI（3.6.1）
+## 獨立 GUI（3.7.0）
+
+3.7.0 新增 DATA TREE「新增子節點…／新增根節點…」及可新增節點提示。
+可依設備 schema 逐層建立 leaf、container、list、leaf-list，填完後只加入 XML 草稿；
+新增使用 create，避免覆寫既有資料。詳見 GUI_GUIDE_ZH_TW.md。
+
+3.6.2 的系統 SSH host key 驗證預設不勾選；「連線系統 SSH」閒置時為藍色、
+成功後為綠色；登入密碼欄位加寬，跳板分頁改名為「SSH跳板」。Source / Target
+初次開啟預設為 running。
 
 3.6.1 將「NETCONF方式修改」（綠色）及「使用系統sysrepocfg修改」（紅色）
 並排放到 XML 區工具列，停用時呈灰色；連線設定分頁改為粗體及藍底白字選中狀態。

@@ -281,7 +281,7 @@ class NetconfWindow(WorkspaceFeatures):
         self.mode_box.bind("<<ComboboxSelected>>", self._mode_changed)
         self.host_entry = self._field(connection, "Server host", "host", 0, 2, 22)
         self.port_entry = self._field(connection, "Port", "port", 0, 4, 7)
-        ttk.Label(connection, text="Source / Target").grid(row=0, column=6, padx=6)
+        ttk.Label(connection, text="Source / Target（預設 running）").grid(row=0, column=6, padx=6)
         self.source_box = ttk.Combobox(connection, textvariable=self.vars["source"], values=("running", "candidate", "startup"), state="readonly", width=10)
         self.source_box.grid(row=0, column=7, padx=4)
         self.source_box.bind("<<ComboboxSelected>>", self._options_changed)
@@ -325,7 +325,7 @@ class NetconfWindow(WorkspaceFeatures):
         self.manage_account_button = ttk.Button(accounts, text="管理…", command=lambda: self.manage_profiles("accounts"))
         self.manage_account_button.pack(side="left", padx=(6, 0))
         self._field(ssh, "帳號", "username", 1, 0, 19)
-        self._field(ssh, "密碼（加密儲存）", "password", 1, 2, 23, True)
+        self.netconf_password_entry = self._field(ssh, "密碼（加密儲存）", "password", 1, 2, 26, True)
         self._path_field(ssh, "Private key", "ssh_key", 1, 4)
         self._path_field(ssh, "Known hosts", "known_hosts", 2, 0)
         ttk.Checkbutton(ssh, text="驗證 SSH host key", variable=self.vars["hostkey_verify"]).grid(row=2, column=3, sticky="w")
@@ -370,7 +370,7 @@ class NetconfWindow(WorkspaceFeatures):
         right = ttk.Panedwindow(main, orient="vertical")
         main.add(left, weight=1)
         main.add(right, weight=4)
-        left.rowconfigure(4, weight=1)
+        left.rowconfigure(5, weight=1)
         left.columnconfigure(0, weight=1)
         tree_header = ttk.Frame(left)
         tree_header.grid(row=0, column=0, sticky="ew", pady=(4, 6))
@@ -387,8 +387,10 @@ class NetconfWindow(WorkspaceFeatures):
         self.schema_button.pack(side="left", padx=5)
         self.save_tree_button = ttk.Button(tree_buttons, text="匯出XML", command=self.save_tree_xml)
         self.save_tree_button.pack(side="left")
+        self.creation_bar = ttk.Frame(left)
+        self.creation_bar.grid(row=4, column=0, sticky="ew")
         tree_frame = ttk.Frame(left)
-        tree_frame.grid(row=4, column=0, sticky="nsew")
+        tree_frame.grid(row=5, column=0, sticky="nsew")
         tree_frame.rowconfigure(0, weight=1)
         tree_frame.columnconfigure(0, weight=1)
         self.tree = ttk.Treeview(tree_frame, show="tree", selectmode="browse")
@@ -403,9 +405,9 @@ class NetconfWindow(WorkspaceFeatures):
         self.tree.bind("<Button-1>", self._tree_click)
         self.tree.bind("<Double-Button-1>", self._tree_double_click)
         self.tree.bind("<<TreeviewSelect>>", self._selected)
-        ttk.Label(left, textvariable=self.schema_status, wraplength=305).grid(row=5, column=0, sticky="w", pady=6)
+        ttk.Label(left, textvariable=self.schema_status, wraplength=305).grid(row=6, column=0, sticky="w", pady=6)
         self.details_button = ttk.Button(left, text="連線 / Schema 詳情", command=self.show_details)
-        self.details_button.grid(row=6, column=0, sticky="w")
+        self.details_button.grid(row=7, column=0, sticky="w")
         top = ttk.Frame(right)
         bottom = ttk.Frame(right)
         right.add(top, weight=3)
@@ -951,7 +953,7 @@ class NetconfWindow(WorkspaceFeatures):
 
     @property
     def dirty(self):
-        return self.selection is not None and self.editor.get() != self.baseline_text
+        return self.selection is not None and (not self.selection.exists or self.editor.get() != self.baseline_text)
 
     def connect(self):
         try:
@@ -1074,7 +1076,7 @@ class NetconfWindow(WorkspaceFeatures):
         self.items[iid] = selection
         style = node_style(selection.node, selection.path, self.client.schema)
         self.tree.insert(parent, "end", iid=iid, text=self._label(selection), tags=(style,) if style else ())
-        if children(selection.node):
+        if children(selection.node) or self._has_creation_children(selection):
             self.tree.insert(iid, "end", iid=iid+"/dummy", text="…")
 
     def _expand_item(self, iid, open_item=True):
@@ -1084,6 +1086,7 @@ class NetconfWindow(WorkspaceFeatures):
             selected = self.items[iid]
             for index, node in enumerate(children(selected.node)):
                 self._insert(iid, iid+"/"+str(index), Selection(node, selected.ancestors+(selected.node,)))
+        self._insert_creation_candidates(iid)
         if open_item:
             self.tree.item(iid, open=True)
 
@@ -1100,6 +1103,11 @@ class NetconfWindow(WorkspaceFeatures):
             return "break"
 
     def _tree_double_click(self, event):
+        iid = self.tree.identify_row(event.y)
+        if iid in self.creation_candidates:
+            parent, info = self.creation_candidates[iid]
+            self.open_creation(root=not parent, info=info, parent_iid=parent)
+            return "break"
         if "indicator" in self.tree.identify_element(event.x, event.y).lower():
             return self._tree_click(event)
 
@@ -1110,7 +1118,7 @@ class NetconfWindow(WorkspaceFeatures):
 
     def _bookmark(self, selection=None):
         selection = selection or self.selection
-        if selection is None:
+        if selection is None or not selection.exists:
             return None
         try:
             chain = (*selection.ancestors, selection.node)
@@ -1178,6 +1186,7 @@ class NetconfWindow(WorkspaceFeatures):
         self.status.set(("DEMO · " if self.demo else "") + "已讀取 %s · %d 個根節點%s" % (
             snapshot.options.source, len(children(snapshot.data)), " + config false" if snapshot.options.state else "")
             + (" · " + " ".join(snapshot.warnings) if snapshot.warnings else ""))
+        self._refresh_creation_candidates()
 
     def _show_selection(self, iid):
         self.selection_iid, self.selection = iid, self.items[iid]
@@ -1278,6 +1287,10 @@ class NetconfWindow(WorkspaceFeatures):
 
     def revert(self):
         if self._discard():
+            if self.selection and not self.selection.exists:
+                self._accept_snapshot(self.snapshot, fresh=False)
+                self._sync()
+                return
             self.editor.set(self.baseline_text)
             self._update_preview()
 

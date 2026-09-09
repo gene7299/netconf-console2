@@ -16,7 +16,7 @@ from ..jump import open_jump
 from ..sshauth import authenticate
 from ..trace import redact_secrets
 from ..xmloutput import serialize_xml
-from .client import config_semantic, locate
+from .client import config_semantic, locate, check_selection_current
 from .model import NC, EditError, parse_editor
 
 MAX_OUTPUT = 32 * 1024 * 1024
@@ -178,9 +178,10 @@ def execute(shell, prepared, selection, plan, schema, timeout=10, defaults=False
     if prepare(plan, schema, program, timeout, defaults) != prepared:
         raise EditError("sysrepocfg 預覽已改變，請重新開啟。")
     before, _ = shell.run(prepared.read_command, timeout=timeout + 10)
-    current = locate(parse_export(before), selection, schema)
-    if config_semantic(current, selection.path, schema) != config_semantic(selection.node, selection.path, schema):
-        raise EditError("SSH 讀取的設定與 NETCONF 快照不同；未送出修改。請確認是同一台設備並重新讀取／選擇該 leaf。")
+    try:
+        check_selection_current(parse_export(before), selection, schema)
+    except EditError as exc:
+        raise EditError("SSH 設定與 NETCONF 快照不符或新增項目已存在；未送出修改。請確認設備並重新讀取。") from exc
     stdout, stderr = shell.run(prepared.command, prepared.payload, timeout=timeout + 10)
     warnings = []
     try:

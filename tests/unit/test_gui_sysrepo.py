@@ -128,6 +128,12 @@ class AdminWidgetTests(unittest.TestCase):
         tabs = [self.app.auth_tabs.tab(tab, "text") for tab in self.app.auth_tabs.tabs()]
         self.assertIn("系統 SSH／sysrepo", tabs)
         self.assertEqual(self.app.vars["admin_port"].get(), "22")
+        self.assertFalse(self.app.vars["admin_verify"].get())
+        self.assertGreaterEqual(self.app.admin_password_entry.cget("width"), 22)
+        self.assertGreaterEqual(self.app.netconf_password_entry.cget("width"), 26)
+        self.assertGreaterEqual(self.app.jump_password_entry.cget("width"), 22)
+        self.assertEqual(self.app.admin_connect_button.cget("background"), "#0969da")
+        self.assertEqual(self.app.admin_connect_button.cget("state"), "normal")
         self.app.vars["admin_password"].set("old-secret")
         self.app._set_preference_values({"mode": "Direct SSH", "username": "oranuser"})
         self.assertEqual(self.app.vars["admin_password"].get(), "")
@@ -139,6 +145,24 @@ class AdminWidgetTests(unittest.TestCase):
         with patch("netconf_console.gui.app.messagebox.showerror"), patch("netconf_console.gui.sysrepo.ShellConnection") as shell:
             self.app._error(EditError("access-denied NACM"))
             shell.assert_not_called()
+
+    def test_system_ssh_connect_button_turns_green_when_connected(self):
+        shell = MagicMock()
+        shell.connected = True
+        self.app.admin_connection = shell
+        self.app._sync_admin()
+        self.assertEqual(self.app.admin_connect_button.cget("background"), "#16a34a")
+        self.assertEqual(self.app.admin_connect_button.cget("state"), "disabled")
+        self.assertEqual(self.app.admin_connect_button.cget("text"), "系統 SSH 已連線")
+
+    def test_connection_labels_and_running_defaults(self):
+        tabs = [self.app.auth_tabs.tab(tab, "text") for tab in self.app.auth_tabs.tabs()]
+        self.assertIn("SSH跳板", tabs)
+        self.assertNotIn("SSH 跳板（VMware）", tabs)
+        self.assertEqual(self.app.vars["source"].get(), "running")
+        labels = [widget.cget("text") for widget in self.app.source_box.master.winfo_children()
+                  if widget.winfo_class() in {"Label", "TLabel"}]
+        self.assertTrue(any("預設 running" in text for text in labels))
 
     def test_edit_actions_are_coloured_and_ordered_in_xml_toolbar(self):
         from tkinter import ttk

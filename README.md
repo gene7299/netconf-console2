@@ -143,7 +143,7 @@ The aliases `user-rpc`, `subscribe`, `notifications`, `watch`, `namespace`, `aut
 ## Native Windows GUI
 
 Version 3.3.0 adds a separate `exportToColleagueEXE/netconf-console2-gui.exe`.
-The CLI remains independent. GUI 3.6.1 includes manageable connection/account history
+The CLI remains independent. GUI 3.7.0 includes manageable connection/account history
 and current-user Windows DPAPI storage, including passwords and last-used fields.
 Both catalogs support search, rename, load-for-edit and confirmed batch deletion.
 Both the XML editor and the complete loaded DATA TREE can be exported as UTF-8 XML.
@@ -156,6 +156,11 @@ The GUI uses the same Direct SSH/TLS and SSH/TLS
 Call Home adapters, with running as its default source. It provides an expandable
 instance tree, schema-aware default/state/change colours, an XML editor and an
 exact outgoing edit-config preview. Network and schema work runs in the background.
+
+Schema-driven child/root creation forms can seed required fields and list keys,
+show optional candidate hints, and stage new containers, leaves and list entries.
+New data uses explicit `create`; existing drafts are preserved and nothing is sent
+automatically. XPath constraints and authorization remain server-validated.
 
 ```powershell
 .\exportToColleagueEXE\netconf-console2-gui.exe

@@ -40,6 +40,22 @@ class NodeInfo:
     type_name: str = ""
     constraints: str = ""
     units: str = ""
+    mandatory: bool = False
+    presence: str = ""
+    min_elements: int = 0
+    max_elements: int | None = None
+    choices: tuple[tuple[str, str], ...] = ()
+    conditions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ChoiceInfo:
+    parent: tuple[str, ...]
+    name: str
+    mandatory: bool
+    default: str = ""
+    outer: tuple[tuple[str, str], ...] = ()
+    conditions: tuple[str, ...] = ()
 
 
 def _text(node, name):
@@ -133,9 +149,15 @@ class SchemaIndex:
     warnings: list[str] = field(default_factory=list)
     module_count: int = 0
     complete: bool = True
+    choices: dict[str, ChoiceInfo] = field(default_factory=dict)
+    statements: dict = field(default_factory=dict, repr=False, compare=False)
+    modules: dict = field(default_factory=dict, repr=False, compare=False)
 
     def lookup(self, path: tuple[str, ...]) -> NodeInfo | None:
         return self.nodes.get(path)
+
+    def child_nodes(self, path):
+        return [info for key, info in self.nodes.items() if key[:-1] == path]
 
     @classmethod
     def compile(cls, sources: dict[str, str], specs: list[ModuleSpec] | None = None):
@@ -197,12 +219,22 @@ class SchemaIndex:
                 namespace = mod.search_one("namespace")
             return "{%s}%s" % (namespace.arg, stmt.arg) if namespace is not None else None
 
-        def walk(stmt, path):
+        def walk(stmt, path, choices=(), conditions=()):
             if getattr(stmt, "i_not_implemented", False):
                 return
-            if stmt.keyword in {"choice", "case"}:
+            conditions += tuple(x.arg for x in stmt.search("when"))
+            if stmt.keyword == "choice":
+                key = "/".join((*path, *(c for c, _ in choices), qname(stmt) or stmt.arg))
+                mandatory = stmt.search_one("mandatory")
+                default = stmt.search_one("default")
+                result.choices[key] = ChoiceInfo(path, stmt.arg,
+                    mandatory is not None and mandatory.arg == "true", default.arg if default else "", choices, conditions)
                 for child in getattr(stmt, "i_children", []):
-                    walk(child, path)
+                    walk(child, path, choices + ((key, child.arg),), conditions)
+                return
+            if stmt.keyword == "case":
+                for child in getattr(stmt, "i_children", []):
+                    walk(child, path, choices, conditions)
                 return
             if stmt.keyword not in DATA_KINDS:
                 return
@@ -249,14 +281,23 @@ class SchemaIndex:
                 keys, tuple(defaults), desc.arg if desc is not None else "",
                 order is not None and order.arg == "user",
                 type_name, "\n".join(constraints), units.arg if units is not None else "",
+                stmt.search_one("mandatory") is not None and stmt.search_one("mandatory").arg == "true",
+                stmt.search_one("presence").arg if stmt.search_one("presence") is not None else "",
+                int(stmt.search_one("min-elements").arg) if stmt.search_one("min-elements") is not None else 0,
+                int(stmt.search_one("max-elements").arg) if stmt.search_one("max-elements") is not None
+                    and stmt.search_one("max-elements").arg != "unbounded" else None,
+                choices, conditions,
             )
+            result.statements[path] = stmt
             for child in getattr(stmt, "i_children", []):
+                # A choice is local to its data parent, not its descendants.
                 walk(child, path)
 
         for (name, rev), module in list(ctx.modules.items()):
             if module is None or module.keyword != "module":
                 continue
             namespace = module.search_one("namespace")
+            result.modules[name] = module
             if namespace is not None:
                 result.namespaces[namespace.arg] = name
             result.module_count += 1

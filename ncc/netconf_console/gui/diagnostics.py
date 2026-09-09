@@ -31,6 +31,12 @@ def self_test(window):
               and style.lookup("Sysrepo.TButton", "background", ()) == "#b91c1c")
         check("High contrast connection tabs", window.auth_tabs.cget("style") == "Connection.TNotebook"
               and style.lookup("Connection.TNotebook.Tab", "background", ("selected",)) == "#0969da")
+        check("System SSH host key verification defaults off",
+              not window.vars["admin_verify"].get()
+              and window.admin_connect_button.cget("background") == "#0969da")
+        check("SSH jump tab label and running source default",
+              "SSH跳板" in [window.auth_tabs.tab(tab, "text") for tab in window.auth_tabs.tabs()]
+              and window.vars["source"].get() == "running")
         check("XML export labels and empty-tree guard", window.save_button.cget("text") == "匯出XML"
               and window.save_tree_button.cget("text") == "匯出XML"
               and window.save_tree_button.instate(["disabled"]))
@@ -120,6 +126,25 @@ def self_test(window):
             check("State writes blocked", True)
         else:
             check("State writes blocked", False)
+        from .creation import Template, new_root_selection
+        from .creation_ui import CreationDialog
+        from .schema import SchemaIndex
+        from .client import Snapshot, ReadOptions
+        schema = SchemaIndex.compile({"create-test": 'module create-test {namespace "urn:create-test";prefix t;container absent {presence "enabled";}}'})
+        window.client.schema = schema
+        snapshot = Snapshot(etree.Element("data"), ReadOptions())
+        window._accept_snapshot(snapshot)
+        dialog = CreationDialog(window, snapshot.data, (), schema.lookup(("{urn:create-test}absent",)))
+        window.root.update()
+        check("Frozen schema creation form", dialog.template is not None and not dialog.template.issues())
+        dialog.stage()
+        check("Absent root stages a create RPC without touching snapshot", window.plan is not None
+              and window.plan.rpc is not None and 'operation="create"' in window.plan.wire_xml
+              and not window.selection.exists and window.dirty and len(snapshot.data) == 0)
+        window.vars["show_candidates"].set(True)
+        draft = window.editor.get()
+        window._refresh_creation_candidates()
+        check("Candidate hints preserve draft", bool(window.creation_candidates) and draft == window.editor.get())
         report["passed"] = True
     except Exception as exc:
         report["error"] = type(exc).__name__ + ": " + str(exc)
@@ -240,6 +265,22 @@ def loopback_test(filename):
                 raise AssertionError("Confirmed cancel/confirm readback mismatch")
             report["lifecycle_xml"].append(to_xml(rpc))
         report["checks"].append("Confirmed commit with token-bound explicit cancel and confirmation")
+        from .creation import Template, new_root_selection
+        template = Template(client.schema, client.schema.lookup(("{urn:ietf:params:xml:ns:yang:ietf-hardware}demo-note",)))
+        template.set_value(template.root[0], "synthetic create round-trip")
+        creation_selection = new_root_selection(template.root, client.schema)
+        creation_plan = build_plan(creation_selection, etree.tostring(template.root).decode(), client.schema)
+        create_options = ReadOptions(defaults=True)
+        creation_test = safety.draft_rpc(creation_plan)
+        safety.test_draft(client, creation_selection, creation_plan, create_options, creation_test)
+        if client.read(create_options).data.find(template.root.tag) is not None:
+            raise AssertionError("Root creation test-only changed running")
+        result = client.apply(creation_selection, creation_plan, create_options)
+        if result.snapshot is None or result.snapshot.data.find(template.root.tag) is None:
+            raise AssertionError("Created root missing from readback")
+        report["creation_xml"] = creation_plan.wire_xml
+        report["creation_test_xml"] = to_xml(creation_test)
+        report["checks"].append("Absent-root test-only and explicit create round-trip")
         streams = events.discover_streams(client.manager)
         options = events.subscription_options("NETCONF", streams, '<alarm xmlns="urn:fixture"/>', "2026-01-01T00:00:00Z")
         client.manager.create_subscription(**options)

@@ -8,7 +8,7 @@ from copy import deepcopy
 from lxml import etree
 
 from .client import ApplyResult, ReadOptions, Snapshot
-from .model import NC, WD, children, identity
+from .model import NC, WD, children, identity, EditError
 from .schema import SchemaIndex
 
 SOURCES = {
@@ -45,6 +45,9 @@ SOURCES = {
           leaf serial-num { config false; type string; }
           leaf temperature { config false; type int32; }
         }
+      }
+      container demo-note {presence "Create an offline demo note";
+        leaf text {type string; mandatory true;}
       }
     }''',
 }
@@ -114,6 +117,8 @@ class DemoClient:
             key = identity(node, self.schema, path)
             found = next((child for child in children(parent) if child.tag == node.tag
                           and identity(child, self.schema, path) == key), None)
+            if node.get("{%s}operation" % NC) == "create" and found is not None:
+                raise EditError("data-exists: the new instance already exists")
             if node.get("{%s}operation" % NC) == "remove":
                 if found is not None:
                     parent.remove(found)

@@ -100,6 +100,7 @@ def main():
         assert target_errors.empty() and jump_errors.empty(), "Fixture thread failed"
         assert server.authenticated and server.forwarded
         assert peer.received_edit == report["wire_xml"] and peer.test_xml == report["test_xml"]
+        assert peer.creation_xml == report["creation_xml"] and peer.creation_test_xml == report["creation_test_xml"]
         assert not peer.locks and not peer.confirmed_token
         print("[OK] SSH jump: separate credentials + both verified host keys + full NETCONF operations + cleanup", flush=True)
         # Negative checks never reach a NETCONF endpoint or send a config RPC.
