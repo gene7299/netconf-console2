@@ -26,6 +26,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "GUI SSH jump tests failed." }
     & py -3 -B tests/integration/gui_sysrepo_smoke.py
     if ($LASTEXITCODE -ne 0) { throw "GUI system SSH tests failed." }
+    & py -3 -B tests/integration/gui_diagnostic_smoke.py
+    if ($LASTEXITCODE -ne 0) { throw "GUI phase diagnostic tests failed." }
     & py -3 -B -m PyInstaller --noconfirm --clean --distpath $OutputDirectory --workpath (Join-Path $WorkDirectory "pyinstaller") (Join-Path $PSScriptRoot "netconf_console2_gui.spec")
     if ($LASTEXITCODE -ne 0) { throw "GUI executable build failed." }
     $guiExe = Join-Path $OutputDirectory "netconf-console2-gui.exe"
@@ -38,6 +40,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Frozen GUI jump tests failed." }
     & py -3 -B tests/integration/gui_sysrepo_smoke.py --exe $guiExe
     if ($LASTEXITCODE -ne 0) { throw "Frozen GUI system SSH tests failed." }
+    & py -3 -B tests/integration/gui_diagnostic_smoke.py --exe $guiExe
+    if ($LASTEXITCODE -ne 0) { throw "Frozen GUI phase diagnostic tests failed." }
     $guiHashes = @(Get-ChildItem -LiteralPath $OutputDirectory -Filter '*.exe' -File | Sort-Object Name | ForEach-Object {
         '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName).Hash, $_.Name
     })

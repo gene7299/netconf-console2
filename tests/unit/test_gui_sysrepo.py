@@ -127,11 +127,23 @@ class AdminWidgetTests(unittest.TestCase):
     def test_separate_tab_defaults_and_profile_migration(self):
         tabs = [self.app.auth_tabs.tab(tab, "text") for tab in self.app.auth_tabs.tabs()]
         self.assertIn("系統 SSH／sysrepo", tabs)
+        self.assertIn("備份／還原", tabs)
         self.assertEqual(self.app.vars["admin_port"].get(), "22")
         self.assertFalse(self.app.vars["admin_verify"].get())
+        self.assertEqual(self.app.vars["backup_base"].get(), "/data/backup-yang-baseline")
+        self.assertEqual(self.app.vars["backup_init_module"].get(), "o-ran-sync")
+        self.assertFalse(self.app.vars["backup_candidate"].get())
+        self.assertFalse(self.app.vars["backup_startup"].get())
+        for button in (self.app.backup_check_button, self.app.backup_create_button,
+                       self.app.backup_restore_button):
+            self.assertTrue(button.instate(["disabled"]))
+        self.assertEqual(self.app.admin_username_entry.grid_info()["row"],
+                         self.app.admin_password_entry.grid_info()["row"])
         self.assertGreaterEqual(self.app.admin_password_entry.cget("width"), 22)
         self.assertGreaterEqual(self.app.netconf_password_entry.cget("width"), 26)
         self.assertGreaterEqual(self.app.jump_password_entry.cget("width"), 22)
+        self.assertEqual(self.app.jump_username_entry.grid_info()["row"],
+                         self.app.jump_password_entry.grid_info()["row"])
         self.assertEqual(self.app.admin_connect_button.cget("background"), "#0969da")
         self.assertEqual(self.app.admin_connect_button.cget("state"), "normal")
         self.app.vars["admin_password"].set("old-secret")
@@ -154,6 +166,38 @@ class AdminWidgetTests(unittest.TestCase):
         self.assertEqual(self.app.admin_connect_button.cget("background"), "#16a34a")
         self.assertEqual(self.app.admin_connect_button.cget("state"), "disabled")
         self.assertEqual(self.app.admin_connect_button.cget("text"), "系統 SSH 已連線")
+
+    def test_system_backup_uses_authenticated_shell_and_remote_timestamp_marker(self):
+        shell = MagicMock()
+        shell.connected = True
+        shell.settings = self.app._admin_settings()
+        shell.run.return_value = (b"NCC_BACKUP_DIR=/data/backup-yang-baseline/20260913-120000\n"
+                                  b"NCC_BACKUP_DATASTORES=running\n", b"")
+        self.app.admin_connection = shell
+        self.app._sync_admin()
+        self.assertTrue(self.app.backup_create_button.instate(["!disabled"]))
+        with patch.object(self.app, "_run", side_effect=lambda _label, work, done: done(work())):
+            self.app.create_system_backup()
+        self.assertIn("20260913-120000", self.app.backup_status.get())
+        command, payload = shell.run.call_args.args[:2]
+        self.assertEqual(command, "sh -s")
+        self.assertIn("STAMP=$(date -u +%Y%m%d-%H%M%S)", payload.decode("utf-8"))
+        self.assertIn("sysrepoctl -l", payload.decode("utf-8"))
+
+    def test_system_restore_does_not_block_on_local_xml_drafts(self):
+        shell = MagicMock()
+        shell.connected = True
+        shell.settings = self.app._admin_settings()
+        shell.run.return_value = (b"NCC_LATEST_BACKUP_DIR=/data/backup-yang-baseline/20260913-120000\n", b"")
+        self.app.admin_connection = shell
+        self.app.drafts.entries["local-draft"] = MagicMock(scope="synthetic")
+        with patch.object(self.app, "_run", side_effect=lambda _label, work, done: done(work())):
+            self.app.restore_system_backup()
+        shell.run.assert_called_once()
+        self.assertIsNotNone(self.app.lifecycle_dialog)
+        bar = self.app.lifecycle_dialog.winfo_children()[-1]
+        next(widget for widget in bar.winfo_children()
+             if widget.winfo_class() == "TButton" and widget.cget("text") == "取消").invoke()
 
     def test_connection_labels_and_running_defaults(self):
         tabs = [self.app.auth_tabs.tab(tab, "text") for tab in self.app.auth_tabs.tabs()]
@@ -196,6 +240,8 @@ class AdminWidgetTests(unittest.TestCase):
     def test_preview_cancel_and_authority_gate_then_single_explicit_write(self):
         self.app.load_demo()
         self.app.demo = False
+        # The new draft guard binds edits to an actual connected session.
+        self.app.client.manager = object()
         self.app._expand_item("0")
         self.app._show_selection("0/0")
         self.app.editor.set(self.app.editor.get().replace(">1500<", ">9000<"))

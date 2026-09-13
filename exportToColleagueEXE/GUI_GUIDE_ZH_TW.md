@@ -1,4 +1,164 @@
-# NETCONF Windows GUI 操作說明（3.7.0）
+# NETCONF Windows GUI 操作說明（3.9.1）
+
+## 3.9.1：新增節點的必填 choice 分支
+
+YANG 的 `choice` 與 `case` 是 schema-only 結構，不會直接出現在 XML；例如
+`transport` choice 的實際 XML 節點是 `ssh` 或 `tls`。在「新增 YANG 節點」視窗中，
+即使目前選取的是 `name` 等 leaf，也會在「缺少必填 choice 分支」清單看到
+`transport → ssh`、`transport → tls` 等可加入選項。選擇後按「加入 choice 分支」，
+再填寫該分支下顯示為「待填」的必要 leaf，最後按「加入 XML 草稿」。
+
+若清單沒有可加入項目，可能是該分支為 `config false`、opaque (`anyxml`／`anydata`)、
+feature／when 條件未啟用，或父節點尚未建立；這些情況會保留本機檢查與伺服器驗證限制，
+不會把 `choice`／`case` 偽造為 XML 標籤。
+
+新增節點預覽與加入草稿時只保留實際 XML 元素、屬性或 QName 值使用的 namespace；
+不會因為目前已載入整份 YANG schema，就把所有 module 的 `xmlns` 都寫入小範本。
+
+新增節點與既有 leaf 表單的值欄位現在都是可自由輸入的文字欄位；下方「建議值（可直接修改）」
+只提供輔助，不會把輸入限制在清單內。建議值會合併 schema default、boolean／enumeration／
+identityref 選項及目前可見的 leafref 目標；選取後按「帶入建議值」，仍可再手動修改，最後按
+「套用欄位值」才會寫入本機草稿。密碼、secret、private-key 等敏感欄位不提供建議值；
+config false、startup、既有 list key 與選取根 leaf-list 識別值仍維持唯讀保護。
+
+## 3.9.0：第 4～7 項功能
+
+### 4. 複製 list 與個人範本庫
+
+1. 在 DATA TREE 選取現有 list instance，例如 `netconf-client[name='client0']`。
+2. 使用「工具 → 複製所選 list 項目…」。表單會保留可寫結構及一般值，清空所有根 list keys，
+   必須逐個重新填寫；同名 key 組合會被拒絕，不會覆寫既有項目。
+3. `config false` 與 opaque 節點不複製；密碼、私鑰等敏感值留為待填欄位。
+   處理依常見敏感欄位名稱、private-key 祖先及 PEM 標記，**特殊 vendor 敏感欄位仍須人工檢查**。
+4. 「加入 XML 草稿」只在父節點產生新項目的 create 預覽，不送出。
+   若與既有父／子草稿重疊，請先處理原草稿；不要用複製功能覆蓋未完成草稿。
+
+「工具 → 保存至個人範本庫」可將目前選取的 list／container 存成 `.ncctemplate`，
+預設放在 GUI 設定資料夾的 `templates` 子資料夾。範本保存時再次清除敏感值與根 list keys，
+以 Windows DPAPI 加密；僅原帳號／電腦可開啟，最多 8 MiB、512 個節點、32 層。
+「工具 → 開啟個人範本庫」開啟檔案清單；先選取正確的父節點／list instance，再載入範本。
+載入必須匹配目前完整 schema 指紋；不匹配時拒絕，不猜測不同 firmware 的欄位對應。
+範本可新增結構，但不能覆寫既有 container；所有缺值、choice、引用與權限仍需檢查。
+
+### 5. 三方衝突處理與送出結果核對
+
+- 選取草稿，使用「工具 → 原始值／設備最新值／草稿：三方比對…」。工具只重新讀取選取根範圍。
+- 並排顯示三方值；點選一列可在下方查看三份 XML。設備的無關變更預設保留，
+  只有草稿變更且設備原值未變時預設採用草稿；雙方修改同一項時必須逐項選擇。
+- 按「此項採用設備最新值」或「此項採用我的草稿」；處理完後「確認合併為新草稿」。
+  這只更新原始基準與本機草稿；取消不變更原草稿，送出前仍會再比對設備。
+- 新增／移除整個子樹是原子選項，不拆散新 list 的結構。選取節點／祖先已消失、定位不唯一，
+  或需移除整個選取根時，會要求重新讀取父節點；不會猜另一個 instance 或自動處理順序重排。
+- 右下「送出結果核對」保留最近一次修改的逐項預期值／讀回值／結果，雙擊查看完整子樹 XML。
+  「重新讀回核對」只讀取原設備、schema、source，不重送，也不自動解除其他寫入保護。
+  sysrepocfg 結果仍須 NETCONF 讀回，不能只憑 SSH exit=0 判定設備符合預期。
+- 同頁可勾選 `NETCONF rollback-on-error`，預設關閉，僅 server 宣告該 capability 時可用。
+  勾選會在實際 RPC 預覽加入 error-option；test-only 亦保留。此選項不適用 sysrepocfg。
+  **逾時／斷線不等於失敗，也不等於已 rollback**；仍需讀回，不會自動重送、commit 或保存 startup。
+
+三方 XML 與結果表可能包含敏感值，只保留在本次執行的記憶體；分享畫面前請遮蔽。
+
+### 6. 連線設定匯入與同事分享
+
+1. 分享前使用進階頁「匯出設定 JSON（不含密碼）」。JSON 仍含主機、帳號與原路徑，分享前請檢查。
+2. 同事從進階頁「匯入設定…」，或工具選單匯入 `.json`／`.dpapi`。
+3. 預覽清單後以雙擊、Space 或「勾選／取消此項」選擇項目；初始全不勾選。
+   可修改匯入名稱並按「套用名稱／選項」。同名預設自動加「匯入」序號；
+   必須明確勾選「取代同名」並確認，才會取代既有設定組。
+4. 預設清空憑證、私鑰、Known hosts、YANG 路徑，並排除密碼。
+   普通 JSON 即使手動加入 password 也不匯入；原電腦的 DPAPI 備份可明確勾選匯入密碼／保留路徑。
+5. 確認後只合併勾選的連線／SSH 帳號組，不會改上排現有欄位、上次選取或正在使用的 session，
+   也不會自動連線。最後未儲存的 `last` 欄位不自動匯入；如要分享，請先存成具名設定組。
+
+私鑰與憑證檔本身不包含在匯入檔內；跨電腦須依公司流程另外配置。上限 4 MiB／1,000 組，
+未知欄位／格式錯誤會拒絕；保存失敗時原清單不受影響。DPAPI 備份不是跨電腦分享格式。
+
+### 7. 一鍵連線診斷與遮蔽報告
+
+先填好上排連線欄位，中斷 NETCONF 並停止自動重連，再選「工具 → 一鍵連線診斷／遮蔽問題報告…」。
+按「開始診斷」才建立臨時 session，列出 TCP、SSH 握手／認證或 TLS 憑證握手、
+NETCONF subsystem／hello、schema 載入結果及耗時；Call Home 另顯示監聽位址與接入來源。
+Direct SSH 跳板的認證及轉送時間單列計算。部分共享步驟不假造獨立耗時，顯示「—」。
+
+診斷完成會關閉自己的臨時 session，不接管主視窗連線，不變更驗證選項，不讀取 running 設定、
+不送出 edit-config／commit／copy-config。schema 查詢會發出唯讀 get／get-schema，
+可以使用／更新本機 schema cache；通過並不表示有寫入權限。
+
+按「取消診斷」可取消監聽及下一個 schema 步驟；正在握手／RPC 時需等底層呼叫返回或逾時。
+連線 timeout 限制為 1～60 秒，RPC timeout 為 1～30 秒；這不是整趟診斷總時限。
+下方預覽即實際匯出的遮蔽 JSON：去除位址／帳號，僅保留階段、耗時、錯誤類別與固定排查提示，
+不包含原始 exception 文字、XML 設定、密碼、金鑰／憑證內容或完整 capability URLs。
+請先檢查預覽，再「匯出遮蔽後報告 JSON」。主視窗仍連線時不啟動第二條診斷，避免占用 Call Home port。
+
+---
+
+## 3.8.0 跨節點草稿、既有 leaf 表單與 leafref 關聯
+
+### 草稿清單與跨次執行保存
+
+修改右上 XML 後，切換 DATA TREE 的其他節點會保留原草稿；回到同一節點會顯示草稿。
+DATA TREE 下的「草稿清單」顯示份數，也可從「工具」開啟，查看路徑、source、狀態與 XML，
+並個別刪除。不會批次送出，仍須逐份檢查右下 RPC，再自行確認修改。
+
+- 依 NETCONF 端點／帳號／連線路徑、running 或 candidate、含 list key 的節點路徑隔離。
+  不將 Call Home 的臨時來源 port 當成設備識別。若同一位址可能接到不同設備，請自行核對設備身分。
+- 相異 list instance 可有不同草稿；**父子範圍重疊不會自動合併**。
+  例如已編輯整個 interface，再點其 l2-mtu 時，請先回草稿清單開啟原 interface 草稿。
+- 輸入停頓約 700 ms 後加密保存；關閉／主動中斷連線前再次保存。
+  未完成、暫時無法解析的 XML 也能保留，但無法產生可送出的 RPC。
+- 保存於 GUI 設定檔同一資料夾的 `gui-drafts.nccdrafts`，使用 Windows DPAPI，
+  僅原 Windows 帳號／電腦可解密；不會降級保存明文。示範／測試模式僅存在記憶體。
+  此檔不適合交給同事，也已加入 Git 忽略規則。最多 100 份、單份 XML 16 MiB、總內容 32 MiB。
+  目前請使用單一 GUI 實例編輯草稿；不支援多個程序同時更新同一份草稿檔。
+- 重開程式或重連後，先連到原設備並選同一 source，再在草稿清單選「重新比對／載入」。
+  確認設備後，工具會唯讀重讀、比對原值與 schema；不同就停止，不會自動覆蓋或合併衝突。
+  遇到衝突可使用 3.9.0 的三方比對，逐項確認後重建草稿；也可先匯出 XML 留存，再手動重新建立。
+- NETCONF 修改讀回相符後只移除已送出的那份草稿；讀回不同／失敗會保留並禁止直接重送。
+  sysrepocfg 修改仍須另行重新讀取 NETCONF 確認。設備有其他本機草稿時，整份 datastore 的
+  commit／discard／保存等寫入先停用，避免誤處理其他草稿；比較與 validate 不受此限制。
+- 「還原」或手動重新讀取目前編輯範圍時，確認放棄會刪除該範圍草稿；其他草稿不受影響。
+  加密保存失敗時請先匯出未保存 XML。無法解密的原檔不會覆寫；請先妥善保留原檔，
+  關閉程式後將它移開，再重開程式建立新的草稿檔。
+
+草稿預覽／XML 匯出仍可能含密碼等設定，分享前請遮蔽。加密不會保護已解密顯示在螢幕上的內容。
+
+### 編輯已存在的 leaf
+
+選取 leaf、list 或 container，按「表單編輯 leaf／引用…」；也可雙擊 DATA TREE 的 leaf。
+表單列出所選範圍已有的 leaf／leaf-list，顯示型別、限制、units、default 與欄位說明。
+所有可寫欄位都可直接輸入；「帶入建議值」可帶入 schema default、型別選項或可見 leafref
+候選，帶入後仍可修改。按「套用欄位值」或 Enter
+做本機型別檢查。切換欄位會先套用上一個有效輸入；「更新 XML 草稿」只更新右上 XML 與 RPC 預覽。
+**不會直接送出。** config false、startup、既有 list key 與選取根 leaf-list 的識別值唯讀。
+新增尚未存在的欄位仍使用下一節的「新增子節點…／新增根節點…」。
+
+### 刪除已存在的資料節點
+
+選取 DATA TREE 中要移除的既有可寫節點，按紅色「刪除整個節點…」；也可在樹狀清單按 Delete
+鍵或從「工具 → 刪除整個選取節點…」執行。GUI 會自動切換到父節點，把該項目從本機
+XML 草稿移除，右下預覽會產生 `nc:operation="remove"`；確認預覽後，仍要自行按
+「NETCONF方式修改」或「使用系統sysrepocfg修改」才會送出。
+
+這樣選取 `netconf-client` 這類 container／list 時，不必在整棵子樹中手動刪除 XML。
+若選取的父節點底下已有子節點草稿，確認刪除父節點時會明確列出並一併移除那些
+子草稿，避免它們再次阻擋父層的刪除；取消確認則不會丟棄任何草稿。
+根節點、`config false`、未知 schema 節點及 list key 識別 leaf 不提供刪除按鈕；要刪除
+整個 list 項目請選取 list 本身，而不是其中的 key leaf。刪除只先改本機草稿，取消確認
+不會修改 XML 或設備。
+
+### leafref 候選與引用目標
+
+既有 leaf 表單與新增表單會從目前可見快照及這份草稿解析 leafref，提供候選值、path、
+require-instance 與 when 提示。支援相對路徑、module prefix、`current()` 與 list key 條件，
+候選上限 200 筆；不會拿其他節點草稿當成設備已存在的資料。
+按「查看引用目標…」可查看實際 instance 路徑，再按「保留草稿並跳到目標」。
+若目標只在新草稿而不在 DATA TREE，會提示回原草稿查看，不會誤跳至其他 list 項目。
+
+**沒有候選不等於目標不存在**：NACM、defaults 或尚未讀取的資料都可能影響結果。
+無法可靠解析時標記待伺服器驗證；完整 `must`／`when`／`unique`、引用存在性與權限仍由
+NETCONF server 驗證。可先做 test-only（需 server 支援），不會改用實際寫入測試。
+
+---
 
 3.7.0：新增 schema 範本表單、可新增節點提示及整個根節點不存在時的建立入口。
 
@@ -14,14 +174,15 @@
    例如 `call-home → netconf-client → endpoints → endpoint`，再選設備 schema
    提供的 SSH 或 TLS 分支。list 的 key、mandatory 與 min-elements 欄位會產生待填提示。
    **新增另一筆 list 時，選取 list 的父容器，再新增一次相同 list 類型**，填不同 key。
-5. 選取 leaf 填值後按「套用欄位值」（Enter 亦可）；boolean／enumeration／identityref
-   提供候選值。可新增可選欄位，也可移除範本節點；缺少必填欄位時不能完成。
+5. 選取 leaf 填值後可直接輸入，或從「建議值（可直接修改）」選一項並按「帶入建議值」，
+   再按「套用欄位值」（Enter 亦可）。建議值只是輔助，不會限制自訂輸入；可新增可選欄位，
+   也可移除範本節點；缺少必填欄位時不能完成。
    不會自動選擇互斥 choice 分支，不會填造主機、密碼、金鑰等值。
 6. 按「加入 XML 草稿」只合併進右上 XML，保留該選取範圍既有修改；右下顯示實際 RPC。
    確認後才使用「NETCONF方式修改」或「使用系統sysrepocfg修改」送出。
    不會自動 commit candidate 或保存 startup；「還原」可放棄新根節點草稿。
 
-勾選「顯示可新增節點」後，DATA TREE 會以灰色 `＋` 顯示候選，雙擊可開啟表單。
+勾選「顯示可新增節點」後，DATA TREE 會以灰色標示候選，並在左側展開指示器欄顯示「＋」；候選會與相同階層節點對齊，雙擊可開啟表單。
 提示來自 schema 與上次讀取的資料，不是設備實際資料；不會混入 DATA TREE XML 匯出。
 **未讀到不保證不存在**：可能是 NACM 過濾、隱含 default 或 when 條件。
 新增使用 `nc:operation="create"`，遇到設備已存在的同名節點／相同 list key 會拒絕，
@@ -119,8 +280,11 @@ IP/port，Windows 防火牆也必須允許該 port；GUI 不會自動更改防�
   包含連線失敗的嘗試。已選取／輸入既有名稱時，更新該組快照，不另建 `(2)`。
   關閉視窗只保存目前欄位，不再自動新增清單項目。
 - 可在「連線設定組」輸入名稱，按「儲存連線設定」。同名儲存會更新該組快照；
-  「另存新組」沿用目前欄位，清空名稱，方便建立另一組。選取清單項目會還原
-  該組的模式、位址、連接埠、認證、TLS 路徑、SAN、驗證選項、逾時與讀取選項。
+  「另存新組」會先要求一個新的、不重複的名稱，再沿用目前欄位建立新組，
+  不會因欄位內容相同而誤回存到舊組。選取清單項目會還原該組的完整快照：
+  模式、位址、連接埠、Source / Target、認證、TLS 路徑、SAN、驗證選項、逾時、
+  讀取選項、SSH 跳板及系統 SSH／sysrepocfg 設定；SSH／TLS／跳板／系統 SSH
+  密碼會與其他 GUI 設定一樣使用 Windows DPAPI 保存。
 - SSH 認證頁另有「SSH 帳號組」清單。「新增帳號」清空帳號、密碼及 SSH key 路徑；
   「儲存帳號」保存這組帳號、密碼、key 路徑及 agent／搜尋金鑰選項。
   要保留同帳號不同認證，請按「新增帳號」後填入，或輸入另一個設定組名稱。
@@ -141,7 +305,8 @@ IP/port，Windows 防火牆也必須允許該 port；GUI 不會自動更改防�
 - 「刪除選取項目…」確認後批次刪除並立即加密保存。刪除只影響**本機清單**，
   不會刪除 RU 上的使用者、憑證、私鑰或其他檔案。
 - 連線組與帳號組是獨立快照，刪除帳號組不會清除其他連線組內保存的同一帳密。
-  目前畫面欄位／上次欄位還原也會保留；這不是完整清除認證的功能。
+  連線組本身仍保留儲存當下的完整帳密與其他連線欄位，所以刪除帳號組不會清除
+  其他連線組內保存的同一帳密；這不是完整清除認證的功能。
 - 關閉或重開 GUI 不會把已刪除的清單項目加回。再次按連線或儲存，才可能重新加入。
   刪除無復原按鈕，建議先在進階頁匯出加密備份；寫入失敗時原清單保持不變。
 - 3.3.3 不再因 source、default/state、折行、收合或自動重連選項變更而新增匿名
@@ -454,8 +619,8 @@ NETCONF 的 `access-denied` 表示該 NETCONF 帳號未通過授權；不等於�
 1. 點「顯示連線設定」，打開「系統 SSH／sysrepo」分頁。
 2. Host 預設 `127.0.0.1`、port `22`、帳號 `root`；填入 Docker 模擬 O-RU 的實際系統 SSH 帳密。
 3. 選擇 password／private-key／agent／auto；登入密碼與私鑰密碼分開。
-4. host key 驗證預設開啟；指定 Known hosts 或使用 `%USERPROFILE%\.ssh\known_hosts`。
-   請先核對主機指紋。若在受控本機環境自行取消驗證，SSH 就不會驗證伺服器身分。
+4. host key 驗證預設不勾選；正式環境建議核對主機指紋並啟用，指定 Known hosts
+   或使用 `%USERPROFILE%\.ssh\known_hosts`。未勾選時 SSH 不驗證伺服器身分。
 5. 按「連線系統 SSH」。這只建立系統 SSH 連線，不執行修改；「中斷 SSH」不會中斷 NETCONF。
 
 **Windows 的 `127.0.0.1:22` 必須實際轉送到存放該 sysrepo 的 O-RU Docker 容器。**
@@ -510,6 +675,77 @@ sysrepo 專用 `sr:operation="none"`（`sr` namespace 為 `http://www.sysrepo.or
   關閉 SSH channel 不能保證遠端尚未執行；請核對實際 running 後再操作。
 - 所有測試使用本機合成 SSH peer；未對你的真實 O-RU 執行 sysrepocfg 修改。
 
+## 3.9.1 遠端 Sysrepo 備份／還原
+
+「系統 SSH／sysrepo」分頁旁新增「備份／還原」分頁。這裡執行的是已登入 RU
+的系統 SSH 命令，不是 NETCONF `copy-config`，也不是 GUI 本機設定的 DPAPI 備份。
+因此必須先連線到真正存放 Sysrepo 的主機，且系統 SSH 帳號要有 `sysrepocfg`、
+`sysrepoctl`、`sha256sum` 與 `systemctl` 的必要權限。
+
+### 建立備份
+
+1. 在「系統 SSH／sysrepo」填入 RU 的 system SSH host、port、帳號與認證，按「連線系統 SSH」。
+2. 切到「備份／還原」；確認遠端 BASE（預設 `/data/backup-yang-baseline`）、
+   `sysrepoctl` 路徑與初始 YANG module（預設 `o-ran-sync`）。BASE 只接受安全的絕對路徑，
+   不接受 `sudo`、管線或其他 shell 片段。
+3. `running` 固定必要；可選擇另外備份 `candidate`／`startup`，按「建立遠端備份」。
+   「檢查 YANG 初始化」可先單獨確認 `sysrepoctl -l | grep -F -q -- o-ran-sync`。
+
+每次備份會在遠端建立獨立且權限受限的 UTC 時間目錄：
+
+```text
+/data/backup-yang-baseline/YYYYMMDD-HHMMSS[-pid]/
+├── running.xml       # 必有；另外勾選的 datastore 也會在這裡
+├── modules.txt       # sysrepoctl -l
+└── SHA256SUMS        # XML 的 sha256sum
+```
+
+等價的核心遠端操作是：
+
+```sh
+umask 077
+sysrepocfg --export="$DEST/running.xml" --datastore=running --format=xml
+sysrepoctl -l > "$DEST/modules.txt"
+(cd "$DEST" && sha256sum ./*.xml > SHA256SUMS)
+```
+
+工具會先建立 `BASE` 並設定 `700`，備份目錄也是 `700`，檔案為 `600`；中途失敗會清理
+不完整的時間目錄。時間相同時會加上 process id 尾碼，不會覆寫舊備份。
+
+### 從最新備份還原 running
+
+按「從最新備份還原 running」後，工具會在 BASE 下找名稱以時間開頭的最新目錄，要求同時有
+`running.xml` 與 `SHA256SUMS`，先驗證 checksum；真正執行前還會再次確認最新目錄與 checksum。
+還原只套用 `running.xml`，不會自動還原 candidate、startup、YANG module 安裝或 GUI 設定。
+
+還原是可能中斷服務的管理操作，必須先中斷 NETCONF，並在確認視窗勾選授權後才會執行。
+還原前不會檢查或阻擋本機 XML 草稿；還原完成後，原本的草稿可能與設備狀態不一致，請重新
+讀取 running 並自行檢查或清理草稿。執行時會依序停止：
+
+```text
+meta-oran-mplaned.service
+rumanager.service
+netopeer2-server.service
+mplane-dependency.service
+meta-oran-dbus.service
+```
+
+然後對上列清單中還原前確實為 `active` 的服務執行：
+
+```sh
+sha256sum -c "$LATEST/SHA256SUMS"
+sysrepocfg --copy-from="$LATEST/running.xml" --datastore=running --format=xml
+```
+
+程式只重新啟動還原前原本為 `active` 的服務，並按 `meta-oran-dbus`、
+`mplane-dependency`、`netopeer2-server`、`meta-oran-mplaned`、`rumanager` 的順序嘗試恢復；
+這比固定只啟動其中兩個服務安全，避免把原本正在運作的服務留在 stopped。若服務啟動失敗，
+會明確列出，不會假裝全部恢復成功。
+
+還原前後都不會自動重送 XML、commit 或保存 startup。還原成功或結果不明後，GUI 會要求重新
+連線 NETCONF 並重新讀取 running；若最新備份在確認後被另一個備份取代，工具會停止而不套用。
+這些按鈕不提供任意 shell、`sudo`、`docker exec` 或 NACM 自動放行，請只對已獲授權的 RU 使用。
+
 ## 測試與建置
 
 從原始碼啟動：
@@ -531,11 +767,13 @@ GUI EXE 的離線 runtime/widget 測試：
 四種傳輸的實際握手、schema、讀取、lock/edit/unlock 及回讀，並逐字比較預覽與
 伺服器收到的 XML。測試不使用正式設備或正式認證資料。
 
-本次也以使用者提供的 `localhost:830` SSH 端點完成唯讀實機測試：讀到 10 個
+早期版本曾以使用者提供的 `localhost:830` SSH 端點完成唯讀實機測試：讀到 10 個
 running 根節點、84 個 YANG modules 與 2,162 個 schema 節點；可辨識伺服器
 default 與 config false，並在本機產生含正確 list key 的修改預覽。
 **這項實機測試沒有送出 edit-config、commit 或 copy-config。** 四種模式的
 寫入回讀與逐字 XML 比對僅在隔離的本機測試 peers 執行。
+3.8.0 新增草稿 DPAPI／隔離／重新比對、既有 leaf 表單與 leafref 條件的本機回歸測試；
+本次更新沒有對真實 O-RU 執行連線或修改。
 
 標準依據：[RFC 6241](https://www.rfc-editor.org/rfc/rfc6241.html)、
 [RFC 6243](https://www.rfc-editor.org/rfc/rfc6243.html)、

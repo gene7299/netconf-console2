@@ -12,7 +12,8 @@ from ..config import config_dir
 
 MAGIC = b"NCCGUI-DPAPI\x01"
 SSH_FIELDS = ("username", "password", "ssh_key", "allow_agent", "look_for_keys", "ssh_auth", "key_passphrase")
-VIEW_FIELDS = {"source", "defaults", "state", "wrap_xml", "connection_hidden", "auto_reconnect", "show_candidates"}
+CONNECTION_ACCOUNT_FIELD = "account_name"
+VIEW_FIELDS = {"source", "defaults", "state", "wrap_xml", "connection_hidden", "auto_reconnect", "show_candidates", "rollback_on_error"}
 
 
 class PreferencesError(ValueError):
@@ -142,7 +143,9 @@ def remember_account(book, values, name=""):
 
 
 def remember_connection(book, values, name=""):
-    # View-only changes must not create another connection-history entry.
+    # A connection record is a complete GUI snapshot, including credentials,
+    # jump-host fields, and the system SSH/sysrepocfg fields. View-only
+    # changes must not create another automatic history entry.
     if not name.strip():
         comparable = {k: v for k, v in values.items() if k not in VIEW_FIELDS}
         for saved_name, saved in book["connections"].items():

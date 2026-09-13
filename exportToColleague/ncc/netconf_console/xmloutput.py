@@ -13,6 +13,10 @@ from pathlib import Path
 from lxml import etree
 
 
+XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
+QNAME_VALUE = re.compile(r"(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_.-]*):([A-Za-z_][A-Za-z0-9_.-]*)")
+
+
 @dataclass
 class XmlResult:
     """Carry an interactive command's output options back to the renderer."""
@@ -60,11 +64,89 @@ def read_xml(filename: str, huge_tree: bool = False) -> etree._ElementTree:
     return etree.parse(io.BytesIO(data), parser)
 
 
-def serialize_xml(element: etree._Element | etree._ElementTree, mode: str = "pretty") -> bytes:
-    """Indent element-only content, preserving leaf values and mixed content."""
+def _compact_namespace_copy(element: etree._Element | etree._ElementTree) -> etree._Element:
+    """Copy XML with only namespaces used by names, attributes or QName text."""
+    source = element.getroot() if isinstance(element, etree._ElementTree) else element
+    used = []
+    seen_uris = set()
+    preferred = {}
 
-    if mode == "pretty":
+    def remember(uri):
+        if uri and uri != XML_NAMESPACE and uri not in seen_uris:
+            seen_uris.add(uri)
+            used.append(uri)
+
+    def inspect(node):
+        if isinstance(node.tag, str) and node.tag.startswith("{"):
+            remember(node.tag[1:].split("}", 1)[0])
+        for name, value in node.attrib.items():
+            if isinstance(name, str) and name.startswith("{"):
+                remember(name[1:].split("}", 1)[0])
+            for prefix, _local_name in QNAME_VALUE.findall(value or ""):
+                remember(node.nsmap.get(prefix))
+        for value in (node.text, node.tail):
+            for prefix, _local_name in QNAME_VALUE.findall(value or ""):
+                remember(node.nsmap.get(prefix))
+        for prefix, uri in node.nsmap.items():
+            if prefix != "xml" and uri:
+                preferred.setdefault(uri, []).append(prefix)
+        for child in node:
+            inspect(child)
+
+    inspect(source)
+    nsmap = {}
+    used_prefixes = set()
+    root_uri = source.tag[1:].split("}", 1)[0] if isinstance(source.tag, str) and source.tag.startswith("{") else None
+    for prefix, uri in source.nsmap.items():
+        if uri not in seen_uris or prefix == "xml":
+            continue
+        if prefix is None and uri != root_uri:
+            continue
+        if prefix not in used_prefixes:
+            nsmap[prefix] = uri
+            used_prefixes.add(prefix)
+    for uri in used:
+        if uri in nsmap.values():
+            continue
+        for prefix in preferred.get(uri, ()):
+            if prefix is None and uri != root_uri:
+                continue
+            if prefix not in used_prefixes:
+                nsmap[prefix] = uri
+                used_prefixes.add(prefix)
+                break
+        else:
+            index = 0
+            while "ns%d" % index in used_prefixes:
+                index += 1
+            prefix = "ns%d" % index
+            nsmap[prefix] = uri
+            used_prefixes.add(prefix)
+
+    def clone(node, root=False):
+        if isinstance(node.tag, str):
+            copied = etree.Element(node.tag, attrib=dict(node.attrib), nsmap=nsmap if root else None)
+            copied.text = node.text
+            for child in node:
+                child_copy = clone(child)
+                copied.append(child_copy)
+                child_copy.tail = child.tail
+            copied.tail = node.tail
+            return copied
+        return deepcopy(node)
+
+    return clone(source, root=True)
+
+
+def serialize_xml(element: etree._Element | etree._ElementTree, mode: str = "pretty",
+                  *, compact_namespaces: bool = False) -> bytes:
+    """Indent XML, optionally dropping unused namespace declarations."""
+
+    if compact_namespaces:
+        element = _compact_namespace_copy(element)
+    elif mode == "pretty":
         element = deepcopy(element)
+    if mode == "pretty":
         root = element.getroot() if isinstance(element, etree._ElementTree) else element
         pending = [(root, 0)]
         while pending:

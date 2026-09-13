@@ -1,6 +1,7 @@
 """Creation safety, effective schema metadata, native forms and RPC regressions."""
 from copy import deepcopy
 import tkinter as tk
+from tkinter import ttk
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -9,8 +10,10 @@ from lxml import etree
 
 from netconf_console.gui.app import NetconfWindow
 from netconf_console.gui.client import GuiClient, Snapshot, ReadOptions, check_selection_current
-from netconf_console.gui.creation import Template, candidates, append_template, new_root_selection, scalar_options
-from netconf_console.gui.creation_ui import CreationDialog
+from netconf_console.gui.creation import (Template, candidates, append_template, choice_candidates,
+                                           missing_choice_candidates, new_root_selection, scalar_options,
+                                           suggested_values)
+from netconf_console.gui.creation_ui import CreationDialog, field_info_text
 from netconf_console.gui.model import EditError, NC, Selection, build_plan
 from netconf_console.gui.schema import SchemaIndex, ModuleSpec
 from netconf_console.gui import safety, sysrepo
@@ -27,10 +30,14 @@ YANG = '''module create-test {
      list client {key "name zone"; max-elements 3;
        leaf name {type string {length "1..12";}}
        leaf zone {type uint8;}
-       container endpoint {
-         leaf address {type string {length "1..50";} mandatory true;}
-         leaf port {type uint16 {range "1..65535";} default 4334;}
+     container endpoint {
+       leaf address {type string {length "1..50";} mandatory true;}
+       leaf port {type uint16 {range "1..65535";} default 4334;}
+       choice transport {mandatory true;
+         case ssh {container ssh {leaf host-key {type string;}}}
+         case tls {container tls {leaf certificate {type string;}}}
        }
+     }
        choice auth {mandatory true;
          case password {leaf password {type string {length "3..30";} mandatory true;}}
          case key {leaf key {type string; mandatory true;}}
@@ -73,6 +80,8 @@ class CreationTests(unittest.TestCase):
             for name in names:
                 node = node.find(path(name)[0])
             template.set_value(node, value)
+        endpoint = template.root.find(path("endpoint")[0])
+        template.add(endpoint, self.info("server", "call-home", "client", "endpoint", "ssh"))
         password = template.add(template.root, self.info("server", "call-home", "client", "password"))
         template.set_value(password, "test-only")
         return template
@@ -87,6 +96,16 @@ class CreationTests(unittest.TestCase):
         self.assertEqual({n.tag for n in client.pending}, set(path("name", "zone", "address")))
         self.assertTrue(any(c.mandatory and c.parent == client.path for c in self.schema.choices.values()))
         self.assertTrue(self.info("server", "optional-presence").presence)
+
+    def test_field_info_uses_semantic_lines_without_empty_type_separator(self):
+        info = SimpleNamespace(module="ietf-netconf-server", kind="container", type_name="",
+                               presence="Indicates that server-initiated call home connections\n"
+                                       "have been configured.", constraints="", description="Configures NETCONF.")
+        rendered = field_info_text(info)
+        self.assertEqual(rendered.splitlines()[0], "ietf-netconf-server · container")
+        self.assertIn("presence：Indicates that server-initiated call home connections have been configured.", rendered)
+        self.assertIn("description：Configures NETCONF.", rendered)
+        self.assertNotIn(" · · ", rendered)
 
     def test_candidate_reasons_include_readonly_existing_and_choice(self):
         parent = etree.fromstring(b'<server xmlns="urn:create-test"><enabled>true</enabled></server>')
@@ -115,6 +134,17 @@ class CreationTests(unittest.TestCase):
         self.assertIn(kind.text, scalar_options(self.schema, self.info("server", "call-home", "client", "kind")))
         self.assertEqual(template.issues(), [])
 
+    def test_suggested_values_are_helpful_but_not_a_closed_value_set(self):
+        enabled = self.info("server", "enabled")
+        self.assertEqual(suggested_values(self.schema, enabled), ("true", "false"))
+
+        port = self.info("server", "call-home", "client", "endpoint", "port")
+        self.assertEqual(suggested_values(self.schema, port), ("4334",))
+
+        ref = self.info("server", "call-home", "client", "ref")
+        self.assertEqual(suggested_values(self.schema, ref, ("client0", "client1")),
+                         ("client0", "client1"))
+
     def test_list_duplicates_and_leaf_list_maximum(self):
         template = self.client_template()
         parent = etree.Element(path("call-home")[0])
@@ -136,6 +166,30 @@ class CreationTests(unittest.TestCase):
         self.assertTrue(template.issues())
         template.set_value(key, "synthetic-key")
         self.assertFalse(template.issues())
+
+    def test_missing_choice_exposes_concrete_branch_and_can_add_it(self):
+        template = Template(self.schema, self.info("server", "call-home", "client"))
+        for names, value in ((('name',), 'client0'), (('zone',), '1'), (('endpoint', 'address'), '2000::c5')):
+            node = template.root
+            for name in names:
+                node = node.find(path(name)[0])
+            template.set_value(node, value)
+        password = template.add(template.root, self.info("server", "call-home", "client", "password"))
+        template.set_value(password, "test-only")
+        endpoint = template.root.find(path("endpoint")[0])
+        options = choice_candidates(self.schema, endpoint,
+                                    path("server", "call-home", "client", "endpoint"))
+        self.assertEqual({(option.choice.name, option.branch) for option in options},
+                         {("transport", "ssh"), ("transport", "tls")})
+        self.assertEqual({option.info.path[-1] for option in options},
+                         {path("server", "call-home", "client", "endpoint", "ssh")[-1],
+                          path("server", "call-home", "client", "endpoint", "tls")[-1]})
+        ssh = next(option for option in options if option.branch == "ssh")
+        added = template.add(ssh.parent, ssh.info)
+        self.assertEqual(added.tag, path("ssh")[-1])
+        remaining = missing_choice_candidates(self.schema, template.root, template.path)
+        self.assertNotIn("transport", {option.choice.name for option in remaining})
+        self.assertNotIn("choice", " ".join(template.issues()))
 
     def test_presence_min_elements_and_deviation(self):
         source = '''module extra {yang-version 1.1; namespace "urn:extra"; prefix e;
@@ -286,6 +340,20 @@ class CreationWidgetTests(unittest.TestCase):
         self.assertEqual(self.app.editor.get(), edited)
         self.assertEqual(etree.tostring(self.app.snapshot.data), original)
 
+    def test_root_creation_candidates_align_with_root_rows(self):
+        self.app.vars["show_candidates"].set(True)
+        self.app._refresh_creation_candidates()
+        self.root.update_idletasks()
+        root_candidates = [iid for iid in self.app.creation_candidates if self.app.tree.parent(iid) == ""]
+        self.assertTrue(root_candidates)
+        for iid in root_candidates:
+            self.assertTrue(self.app.tree.get_children(iid))
+            self.assertTrue(self.app.tree.get_children(iid)[0].endswith("/indicator"))
+            self.assertFalse(self.app.tree.item(iid, "text").startswith("＋ "))
+        for iid in self.app.creation_candidates:
+            self.assertTrue(self.app.tree.get_children(iid))
+            self.assertFalse(self.app.tree.item(iid, "text").startswith("＋ "))
+
     def test_empty_snapshot_root_creation_and_revert(self):
         schema = SchemaIndex.compile({"create-test": YANG})
         self.app.client.schema = schema
@@ -311,3 +379,118 @@ class CreationWidgetTests(unittest.TestCase):
         dialog.close()
         self.assertEqual(self.app.editor.get(), before)
         self.assertEqual(self.app.client.sent, [])
+
+    def test_delete_presence_container_stages_one_remove_from_parent(self):
+        schema = SchemaIndex.compile({"create-test": YANG}, [ModuleSpec("create-test", features=())])
+        self.app.client.schema = schema
+        data = etree.Element("data")
+        server = etree.SubElement(data, path("server")[0])
+        call_home = etree.SubElement(server, path("call-home")[0])
+        client = etree.SubElement(call_home, path("client")[0])
+        etree.SubElement(client, path("name")[0]).text = "client0"
+        etree.SubElement(client, path("zone")[0]).text = "1"
+        self.app._accept_snapshot(Snapshot(data, ReadOptions(source="running")))
+        self.app._expand_item("0")
+        call_home_iid = next(
+            iid for iid, item in self.app.items.items()
+            if item.node.tag.endswith("}call-home"))
+        self.app._show_selection(call_home_iid)
+        self.app._sync()
+        self.assertFalse(self.app.delete_button.instate(["disabled"]))
+        with patch("netconf_console.gui.app.messagebox.askyesno", return_value=True):
+            self.app.delete_selected()
+        self.assertTrue(self.app.selection.node.tag.endswith("}server"))
+        self.assertNotIn("call-home", self.app.editor.get())
+        self.assertIn('operation="remove"', self.app.preview.get())
+        self.assertEqual(self.app.plan.removals, 1)
+        self.assertIn("REMOVE", self.app.plan.changes[0])
+
+    def test_delete_parent_also_clears_descendant_draft(self):
+        schema = SchemaIndex.compile({"create-test": YANG}, [ModuleSpec("create-test", features=())])
+        self.app.client.schema = schema
+        data = etree.Element("data")
+        server = etree.SubElement(data, path("server")[0])
+        call_home = etree.SubElement(server, path("call-home")[0])
+        client = etree.SubElement(call_home, path("client")[0])
+        etree.SubElement(client, path("name")[0]).text = "client0"
+        etree.SubElement(client, path("zone")[0]).text = "1"
+        self.app._accept_snapshot(Snapshot(data, ReadOptions(source="running")))
+        self.app._expand_item("0")
+        call_home_iid = next(iid for iid, item in self.app.items.items()
+                             if item.node.tag.endswith("}call-home"))
+        self.app._expand_item(call_home_iid)
+        client_iid = next(iid for iid, item in self.app.items.items()
+                          if iid.startswith(call_home_iid + "/") and item.node.tag.endswith("}client"))
+        self.app._show_selection(client_iid)
+        self.app.editor.set(self.app.editor.get().replace(">1<", ">2<"))
+        self.app._update_preview()
+        self.assertEqual(len(self.app.drafts.entries), 1)
+        self.app._show_selection(call_home_iid)
+        self.app.uncertain = True
+        self.app._sync()
+        self.assertFalse(self.app.delete_button.instate(["disabled"]))
+        with patch("netconf_console.gui.app.messagebox.askyesno", return_value=True):
+            self.app.delete_selected()
+        self.assertEqual(len(self.app.drafts.entries), 1)
+        self.assertTrue(self.app.selection.node.tag.endswith("}server"))
+        self.assertIn('operation="remove"', self.app.preview.get())
+        self.assertNotIn("client0", " ".join(entry.label for entry in self.app.drafts.entries.values()))
+
+    def test_choice_branch_is_visible_even_when_leaf_is_selected(self):
+        schema = SchemaIndex.compile({
+            "create-test": YANG,
+            "unused": 'module unused { namespace "urn:unused"; prefix u; leaf orphan { type string; } }',
+        })
+        self.app.client.schema = schema
+        server = etree.Element(path("server")[0])
+        call_home = etree.SubElement(server, path("call-home")[0])
+        self.app.snapshot = Snapshot(etree.Element("data"), ReadOptions(source="running"))
+        self.app.selection = Selection(call_home, (server,))
+        self.app.selection_iid = None
+        self.app.editor.set(etree.tostring(call_home, encoding="unicode"))
+        dialog = CreationDialog(self.app, call_home, path("server", "call-home"),
+                                schema.lookup(path("server", "call-home", "client")))
+        self.root.update()
+        self.assertIsNotNone(dialog.template)
+        self.assertNotIn("urn:unused", dialog.preview.get())
+        values = tuple(dialog.choice_box.cget("values"))
+        self.assertTrue(any("transport → ssh" in value for value in values), values)
+        self.assertTrue(any("transport → tls" in value for value in values), values)
+        name_iid = next(iid for iid, node in dialog.nodes.items() if node.tag == path("name")[-1])
+        dialog.tree.selection_set(name_iid)
+        dialog.tree.event_generate("<<TreeviewSelect>>")
+        self.root.update()
+        self.assertTrue(any("transport → ssh" in value for value in dialog.choice_box.cget("values")))
+        dialog.choice_box.current(next(i for i, value in enumerate(dialog.choice_box.cget("values"))
+                                        if "transport → ssh" in value))
+        dialog.add_choice()
+        endpoint = dialog.template.root.find(path("endpoint")[0])
+        self.assertIsNotNone(endpoint.find(path("ssh")[0]))
+        self.assertNotIn("transport", " ".join(dialog.template.issues()))
+        dialog.close()
+
+    def test_creation_field_is_free_text_and_can_apply_a_suggestion(self):
+        schema = SchemaIndex.compile({"create-test": YANG})
+        self.app.client.schema = schema
+        self.app.snapshot = Snapshot(etree.Element("data"), ReadOptions(source="running"))
+        parent = etree.Element(path("server")[0])
+        self.app.selection = Selection(parent, ())
+        self.app.selection_iid = None
+        self.app.editor.set(etree.tostring(parent, encoding="unicode"))
+        info = schema.lookup(path("server", "enabled"))
+        dialog = CreationDialog(self.app, parent, path("server"), info)
+        self.root.update()
+        self.assertIsInstance(dialog.value_entry, ttk.Entry)
+        enabled = next(iid for iid, node in dialog.nodes.items() if node.tag == path("enabled")[-1])
+        dialog.tree.selection_set(enabled)
+        dialog.tree.event_generate("<<TreeviewSelect>>")
+        self.root.update()
+        self.assertEqual(tuple(dialog.suggestion_box.cget("values")), ("true", "false"))
+        dialog.value.set("custom-value")
+        self.assertEqual(dialog.value.get(), "custom-value")
+        dialog.suggestion_box.current(1)
+        dialog.use_suggestion()
+        self.assertEqual(dialog.value.get(), "false")
+        dialog.set_value()
+        self.assertEqual(dialog.selected_node().text, "false")
+        dialog.close()

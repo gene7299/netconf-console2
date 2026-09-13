@@ -1,5 +1,55 @@
 # Changelog
 
+## 3.9.1 - 2026-09-10
+
+- Fix schema-driven creation when a required YANG `choice` is unresolved. The
+  dialog now lists concrete XML nodes for each case (for example
+  `transport → ssh` / `transport → tls`) and can add the selected branch even
+  when a different leaf is selected.
+- Audit the current Cobra schema cache: 84 modules, 3,099 data nodes and 101
+  choices compile successfully; all 65 writable mandatory choices expose at
+  least one allowed concrete branch.
+- Make writable leaf and leaf-list form fields free-text inputs. Add non-binding
+  suggestions from schema defaults, scalar type options and visible leafref
+  targets, with a `帶入建議值` action; sensitive fields remain suggestion-free.
+- Fix GUI connection Save As: it asks for a unique profile name and stores a
+  complete connection snapshot, including SSH/TLS credentials, jump-host and
+  system SSH/sysrepocfg fields. Loading a profile restores that whole snapshot.
+- Add explicit whole-node deletion for existing writable DATA TREE containers,
+  lists and leaf-lists. Deleting a parent stages one `remove` operation at its
+  parent and deliberately discards confirmed descendant drafts after review,
+  so a `call-home` subtree can be removed in one action without sending yet.
+- Add a separate system-SSH `備份／還原` tab for timestamped remote Sysrepo
+  backups. It can export running (and optionally candidate/startup), records
+  `sysrepoctl -l` and SHA256 checksums, and restores only the newest verified
+  `running.xml` after explicit service-stop confirmation.
+
+## 3.9.0 - 2026-09-10
+
+- Add list cloning with mandatory new keys and schema-bound DPAPI personal templates,
+  excluding state and common secret fields before reuse and persistence.
+- Add keyed three-way conflict resolution and per-item write/readback results;
+  resolutions only stage drafts. Gate rollback-on-error on the server capability.
+- Add previewed, checked profile imports with rename/explicit replacement, atomic
+  persistence, password-free portable defaults and local-path reset guidance.
+- Add opt-in temporary-session diagnostics with TCP, SSH/TLS, hello and schema
+  timings, Call Home endpoint details and a redacted export preview.
+- Extend native/frozen and four-transport loopback coverage, including diagnostic
+  read-only RPC allowlists and exact rollback/test-only XML. No real-device writes.
+
+## 3.8.0 - 2026-09-10
+
+- Add device/account/source/keyed-path draft shelves with bounded, atomic Windows
+  DPAPI persistence, partial XML recovery and explicit schema/baseline rechecks.
+- Preserve drafts across navigation and restart; reject parent/child overlap,
+  retain uncertain writes and clear only the draft confirmed by NETCONF readback.
+- Add existing leaf/leaf-list forms with compiled scalar validation, namespace-safe
+  identity values and read-only guards for state, startup and instance keys.
+- Resolve visible leafref candidates using defining-module prefixes, relative paths,
+  current() and key predicates; show relationship targets and server-validation caveats.
+- Add model/native-widget/frozen regression checks; no automatic draft replay,
+  batch writes, candidate commits, startup copies or real-device changes.
+
 ## 3.7.0 - 2026-09-09
 
 - Add schema-driven child/root creation forms, required/key field seeds, nested

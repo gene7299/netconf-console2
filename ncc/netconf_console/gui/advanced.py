@@ -86,6 +86,8 @@ class AdvancedFeatures(AdminFeatures):
         self.alarm_rows = {}
         self._build_jump_fields()
         self._build_admin()
+        tools_menu.add_command(label="系統 Sysrepo 備份／還原…",
+                               command=lambda: self.auth_tabs.select(self.system_backup_page))
 
     def _build_jump_fields(self):
         for name, value in {"jump_host": "", "jump_port": "22", "jump_username": "",
@@ -98,16 +100,17 @@ class AdvancedFeatures(AdminFeatures):
         self.auth_tabs.add(page, text="SSH跳板")
         self._field(page, "跳板 host", "jump_host", 0, 0, 22)
         self._field(page, "Port", "jump_port", 0, 2, 6)
-        self._field(page, "跳板帳號", "jump_username", 0, 4, 16)
-        ttk.Checkbutton(page, text="啟用（僅 Direct SSH）", variable=self.vars["jump_enabled"]).grid(row=0, column=6, padx=6)
-        self.jump_password_entry = self._field(page, "跳板登入密碼", "jump_password", 1, 0, 22, True)
-        self._path_field(page, "跳板 Private key", "jump_key", 1, 2).configure(width=22)
-        self._field(page, "私鑰密碼", "jump_passphrase", 1, 5, 16, True)
-        self._path_field(page, "跳板 Known hosts", "jump_known_hosts", 2, 0).configure(width=22)
-        ttk.Label(page, text="認證方式").grid(row=2, column=3, sticky="e", padx=5)
+        ttk.Label(page, text="認證方式").grid(row=0, column=4, sticky="e", padx=5)
         ttk.Combobox(page, textvariable=self.vars["jump_auth"], values=("password", "private-key", "agent", "auto"),
-                     state="readonly", width=14).grid(row=2, column=4)
-        ttk.Checkbutton(page, text="驗證跳板 host key", variable=self.vars["jump_verify"]).grid(row=2, column=5, columnspan=2, sticky="w")
+                     state="readonly", width=14).grid(row=0, column=5)
+        ttk.Checkbutton(page, text="啟用（僅 Direct SSH）", variable=self.vars["jump_enabled"]).grid(row=0, column=6, padx=6)
+        # Keep the two most commonly entered jump credentials on one row.
+        self.jump_username_entry = self._field(page, "跳板帳號", "jump_username", 1, 0, 16)
+        self.jump_password_entry = self._field(page, "跳板登入密碼", "jump_password", 1, 2, 22, True)
+        ttk.Checkbutton(page, text="驗證跳板 host key", variable=self.vars["jump_verify"]).grid(row=1, column=5, columnspan=2, sticky="w")
+        self._path_field(page, "跳板 Private key", "jump_key", 2, 0).configure(width=22)
+        self._field(page, "私鑰密碼", "jump_passphrase", 2, 3, 16, True)
+        self._path_field(page, "跳板 Known hosts", "jump_known_hosts", 2, 5).configure(width=22)
 
     def _pending(self):
         pending = getattr(self.client, "pending_commit", None)
@@ -139,6 +142,10 @@ class AdvancedFeatures(AdminFeatures):
         reason = self.common_reason(draft=operation == "draft")
         if reason:
             return reason
+        if operation == "draft" and self._draft_guard():
+            return self._draft_guard()
+        if operation not in {"draft", "compare", "validate"} and self._related_drafts():
+            return "尚有此設備的本機草稿；請先處理草稿清單"
         if operation == "draft":
             if not safety.has_cap(self.client, "validate:1.1"):
                 return "server 不支援 :validate:1.1 的 test-only"

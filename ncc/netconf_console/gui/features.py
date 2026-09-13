@@ -11,11 +11,17 @@ from .audit import AuditLog
 from . import lifecycle, events
 from .advanced import AdvancedFeatures
 from .creation_ui import CreationFeatures
+from .drafts_ui import DraftFeatures
+from .leaf_editor import LeafFeatures
+from .template_ui import TemplateFeatures
+from .profile_import_ui import ProfileImportFeatures
+from .reconcile_ui import ReconcileFeatures
+from .diagnostic_ui import DiagnosticFeatures
 from .model import EditError, build_plan, identity
 from .workspace import import_selection, instance_path, search_snapshot, value_changes, xml_diff
 
 
-class WorkspaceFeatures(CreationFeatures, AdvancedFeatures):
+class WorkspaceFeatures(DiagnosticFeatures, ReconcileFeatures, TemplateFeatures, ProfileImportFeatures, LeafFeatures, DraftFeatures, CreationFeatures, AdvancedFeatures):
     def _build_features(self):
         from .app import XmlPane
         self.audit = AuditLog(persist=self.preferences_store is not None,
@@ -71,6 +77,12 @@ class WorkspaceFeatures(CreationFeatures, AdvancedFeatures):
         self.tree.bind("<F1>", lambda _e: self.show_node_info())
         self._build_advanced(tools)
         self._build_creation(tools)
+        self._build_drafts(tools)
+        self._build_leaf_editor(tools)
+        self._build_templates(tools)
+        self._build_profile_import(tools)
+        self._build_reconcile(tools)
+        self._build_diagnostic_ui(tools)
 
     def _rpc_allowed(self):
         if self.notification_manager is None:
@@ -95,6 +107,9 @@ class WorkspaceFeatures(CreationFeatures, AdvancedFeatures):
                 widget.configure(state="disabled")
         self._sync_advanced()
         self._sync_creation()
+        self._sync_drafts()
+        self._sync_leaf_editor()
+        self._sync_reconcile()
 
     def _audit_device(self):
         context = getattr(self.client, "context", None)
@@ -236,7 +251,7 @@ class WorkspaceFeatures(CreationFeatures, AdvancedFeatures):
                 results.insert("end", label)
         def jump(_event=None):
             chosen = results.curselection()
-            if not chosen or self.busy or self.snapshot is not snapshot or not self._discard():
+            if not chosen or self.busy or self.snapshot is not snapshot or not self._preserve_current_draft():
                 return
             selection = found[chosen[0]][1]
             parent = ""

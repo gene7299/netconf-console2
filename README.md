@@ -143,8 +143,11 @@ The aliases `user-rpc`, `subscribe`, `notifications`, `watch`, `namespace`, `aut
 ## Native Windows GUI
 
 Version 3.3.0 adds a separate `exportToColleagueEXE/netconf-console2-gui.exe`.
-The CLI remains independent. GUI 3.7.0 includes manageable connection/account history
-and current-user Windows DPAPI storage, including passwords and last-used fields.
+The CLI remains independent. GUI 3.9.1 includes manageable connection/account history
+and current-user Windows DPAPI storage, including passwords and last-used fields. Each
+named connection is a complete snapshot of NETCONF, SSH/TLS, jump-host and system
+SSH/sysrepocfg settings; Save As asks for a new name and never silently reuses an old
+profile.
 Both catalogs support search, rename, load-for-edit and confirmed batch deletion.
 Both the XML editor and the complete loaded DATA TREE can be exported as UTF-8 XML.
 The advanced tab exports password-free JSON or encrypted full backups. The connection
@@ -161,6 +164,25 @@ Schema-driven child/root creation forms can seed required fields and list keys,
 show optional candidate hints, and stage new containers, leaves and list entries.
 New data uses explicit `create`; existing drafts are preserved and nothing is sent
 automatically. XPath constraints and authorization remain server-validated.
+
+GUI 3.8.0 adds cross-node, device/source-isolated drafts with bounded DPAPI persistence
+and explicit schema/baseline rechecks after reconnect or restart. Parent/child draft
+overlaps are blocked instead of implicitly merged. Existing scalar forms provide typed
+value editing and context-aware leafref candidates with keyed target navigation.
+Restoring or editing a draft never sends it; each write still requires confirmation.
+
+GUI 3.9.0 adds list cloning, encrypted personal templates, explicit three-way conflict
+resolution, per-value write-result checks and capability-gated rollback-on-error.
+Profile imports support preview, selection, renaming and explicit replacement without
+connecting. Temporary-session diagnostics time TCP/auth/hello/schema and export a
+redacted report; diagnostic sessions never apply configuration.
+
+GUI 3.9.1 fixes required YANG choice creation by exposing concrete case nodes (such as
+`transport → ssh` and `transport → tls`) from the schema. Choice/case metadata is never
+written as XML elements; the selected concrete branch is staged in the local draft.
+Writable leaf forms also accept free-text values. A non-binding `帶入建議值` helper can
+insert schema defaults, scalar type options or visible leafref targets; sensitive fields
+do not expose suggestions, and existing read-only safety guards remain in place.
 
 ```powershell
 .\exportToColleagueEXE\netconf-console2-gui.exe
@@ -187,6 +209,10 @@ Version 3.6.0 adds a separate system SSH/sysrepo tab for authorized OS administr
 It can apply the minimal running edit via sysrepocfg stdin after target confirmation,
 preflight comparison and explicit approval. It never automatically falls back to root
 after a NETCONF access-denied error, changes NACM rules or saves startup.
+The adjacent system-SSH `備份／還原` tab creates timestamped remote Sysrepo backup
+directories with `running.xml`, `sysrepoctl -l` and SHA256 metadata. It can optionally
+export candidate/startup and restores only the newest checksum-verified running backup
+after explicit service-stop confirmation.
 See [the GUI guide](GUI_GUIDE_ZH_TW.md) for connection fields, defaults negotiation,
 limitations and testing. Build with `packaging/build-windows-gui.ps1` after installing
 the project dependencies and PyInstaller. Source launch: `py -3 -m netconf_console.gui.app`.

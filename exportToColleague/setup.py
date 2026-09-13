@@ -5,7 +5,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="netconf-console2",
-    version="3.7.0",
+    version="3.9.1",
     description="Windows-native NETCONF CLI and GUI for O-RAN O-RU management-plane testing",
     packages=find_packages("ncc"),
     package_dir={"": "ncc"},

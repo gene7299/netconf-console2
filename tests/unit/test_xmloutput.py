@@ -47,6 +47,18 @@ class XmlOutputTests(unittest.TestCase):
             self.assertEqual(etree.tostring(root.find(tag), with_tail=False),
                              etree.tostring(rendered.find(tag), with_tail=False))
 
+    def test_compact_namespaces_keeps_used_and_drops_unused(self):
+        root = etree.Element("{urn:used}root", nsmap={
+            "used": "urn:used", "value": "urn:value", "unused": "urn:unused",
+        })
+        etree.SubElement(root, "{urn:value}identity").text = "value:item"
+        rendered = serialize_xml(root, compact_namespaces=True)
+        self.assertIn(b'xmlns:used="urn:used"', rendered)
+        self.assertIn(b'xmlns:value="urn:value"', rendered)
+        self.assertNotIn(b"urn:unused", rendered)
+        parsed = etree.fromstring(rendered)
+        self.assertEqual(parsed.find("{urn:value}identity").text, "value:item")
+
     def test_raw_adds_no_indentation(self):
         rendered = serialize_xml(etree.fromstring(SAMPLE.encode()), "raw")
         self.assertNotIn(b'\n  <', rendered)

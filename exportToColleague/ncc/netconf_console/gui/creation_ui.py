@@ -6,8 +6,22 @@ from tkinter import messagebox, ttk
 from lxml import etree
 
 from ..xmloutput import serialize_xml
-from .creation import Template, append_template, candidates, new_root_selection, scalar_options
+from .creation import (Template, append_template, candidates, choice_label,
+                       missing_choice_candidates, new_root_selection, suggested_values)
 from .model import EditError, children, local, parse_editor
+
+
+def field_info_text(info):
+    """Format schema metadata without empty separators or raw line breaks."""
+    metadata = " · ".join(value for value in (info.module, info.kind, info.type_name) if value)
+    details = [metadata]
+    if info.presence:
+        details.append("presence：" + " ".join(info.presence.split()))
+    if info.constraints:
+        details.append("constraints：" + " ".join(info.constraints.split()))
+    elif info.description:
+        details.append("description：" + " ".join(info.description.split()))
+    return "\n".join(details)[:700]
 
 
 class CreationFeatures:
@@ -17,15 +31,21 @@ class CreationFeatures:
         ttk.Checkbutton(self.creation_bar, text="顯示可新增節點（雙擊建立）",
             variable=self.vars["show_candidates"], command=self._refresh_creation_candidates).pack(anchor="w")
         buttons = ttk.Frame(self.creation_bar)
-        buttons.pack(anchor="w", pady=(2, 5))
+        self.creation_action_bar = buttons
+        buttons.pack(anchor="w", pady=(1, 1))
         self.add_child_button = ttk.Button(buttons, text="新增子節點…", command=self.open_creation)
         self.add_child_button.pack(side="left")
         self.add_root_button = ttk.Button(buttons, text="新增根節點…", command=lambda: self.open_creation(root=True))
-        self.add_root_button.pack(side="left", padx=5)
+        self.add_root_button.pack(side="left", padx=(4, 0))
+        self.delete_button = ttk.Button(buttons, text="刪除整個節點…", style="Danger.TButton",
+                                        command=self.delete_selected)
+        self.delete_button.pack(side="left", padx=(4, 0))
         self.tree.tag_configure("candidate", foreground="#64748b")
+        self.tree.bind("<Delete>", lambda _event: (self.delete_selected(), "break")[-1])
         tools.add_separator()
         tools.add_command(label="新增子節點／list 項目…", command=self.open_creation)
         tools.add_command(label="新增根節點…", command=lambda: self.open_creation(root=True))
+        tools.add_command(label="刪除整個選取節點…", command=self.delete_selected)
 
     def _creation_ready(self):
         return (self.snapshot is not None and self.client.connected and self.client.schema.complete
@@ -39,6 +59,34 @@ class CreationFeatures:
         self.add_root_button.configure(state="normal" if ready else "disabled")
         self.add_child_button.configure(state="normal" if ready and info and info.config is True
             and info.kind in {"container", "list"} else "disabled")
+        # Deletion is a local draft operation first, so an already loaded
+        # snapshot may still be edited while NETCONF is disconnected (for
+        # example, when the system SSH/sysrepo channel is being used).
+        delete_ready = (self.snapshot is not None and self.client.schema.complete
+            and self.snapshot.options.source in {"running", "candidate"}
+            and not self.busy and not self._pending()
+            and self.lifecycle_dialog is None)
+        parent_info = None
+        is_list_key = False
+        if self.selection and self.selection.ancestors:
+            parent_info = self.client.schema.lookup(self.selection.path[:-1])
+            is_list_key = bool(parent_info and self.selection.path[-1] in parent_info.keys)
+        guard = self._draft_guard()
+        source = self.snapshot.options.source if self.snapshot else ""
+        try:
+            descendants = (self.drafts.descendant_entries(self._draft_scope(), source, self.selection,
+                                                           self.client.schema)
+                           if self.selection and self.snapshot else [])
+            ancestors = (self.drafts.ancestor_entries(self._draft_scope(), source, self.selection,
+                                                       self.client.schema)
+                         if self.selection and self.snapshot else [])
+        except (EditError, AttributeError, TypeError, ValueError):
+            descendants, ancestors = (), ()
+        deletable = (delete_ready and self.selection is not None and self.selection.exists
+            and bool(self.selection.ancestors) and info is not None and info.config is True
+            and not is_list_key
+            and (not guard or guard.startswith("此範圍") and descendants and not ancestors))
+        self.delete_button.configure(state="normal" if deletable else "disabled")
 
     def _has_creation_children(self, selection):
         return (hasattr(self, "creation_candidates") and self.vars["show_candidates"].get()
@@ -56,9 +104,16 @@ class CreationFeatures:
             if self.tree.exists(ghost):
                 continue
             suffix = "新增項目" if item.info.kind in {"list", "leaf-list"} else "未讀到／可建立"
+            branch = choice_label(self.client.schema, item.info)
+            if branch:
+                suffix += " · choice " + branch
             self.tree.insert(iid, "end", iid=ghost,
-                text="＋ " + item.info.module + ":" + local(item.info.path[-1]) + "（" + suffix + "）",
+                text=item.info.module + ":" + local(item.info.path[-1]) + "（" + suffix + "）",
                 tags=("candidate",))
+            # Treeview only renders its +/- indicator column for an item that
+            # has a child.  Give candidates a private placeholder so their
+            # add '+' is rendered in that same column, not in the label text.
+            self.tree.insert(ghost, "end", iid=ghost + "/indicator", text="")
             self.creation_candidates[ghost] = (iid, item.info)
 
     def _refresh_creation_candidates(self):
@@ -84,15 +139,18 @@ class CreationFeatures:
             self.status.set("請先連線並載入完整 running/candidate schema；此功能只建立本機草稿。")
             return
         if parent_iid is not None and not root and parent_iid != self.selection_iid:
-            if not self._discard():
+            if not self._preserve_current_draft():
                 return
             self._show_selection(parent_iid)
         if root:
-            if not self._discard():
+            if not self._preserve_current_draft():
                 return
             parent, path = self.snapshot.data, ()
         else:
             if not self.selection:
+                return
+            if self._draft_guard().startswith("此範圍"):
+                self.status.set(self._draft_guard())
                 return
             node_info = self.client.schema.lookup(self.selection.path)
             if not node_info or node_info.kind not in {"container", "list"}:
@@ -109,7 +167,7 @@ class CreationFeatures:
 
 
 class CreationDialog:
-    def __init__(self, app, parent, path, initial=None):
+    def __init__(self, app, parent, path, initial=None, preset=None):
         from .app import XmlPane
         self.app, self.parent, self.path = app, deepcopy(parent), path
         self.schema, self.snapshot = app.client.schema, app.snapshot
@@ -117,6 +175,8 @@ class CreationDialog:
         self.template = None
         self.nodes = {}
         self.child_options = []
+        self.choice_options = []
+        self.suggestion_values = ()
         self.previous_pick = None
         self.editing_node = None
         self.window = tk.Toplevel(app.root)
@@ -170,23 +230,42 @@ class CreationDialog:
         self.tree.bind("<<TreeviewSelect>>", self.select_field)
         self.tree.tag_configure("pending", foreground="#b45309")
         self.field_info = tk.StringVar(self.window)
-        ttk.Label(form, textvariable=self.field_info, wraplength=570).grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(form, textvariable=self.field_info, justify="left", anchor="w", wraplength=680).grid(
+            row=1, column=0, sticky="ew", pady=4)
         values = ttk.Frame(form)
         values.grid(row=2, column=0, sticky="ew")
         values.columnconfigure(0, weight=1)
         self.value = tk.StringVar(self.window)
-        self.value_entry = ttk.Combobox(values, textvariable=self.value)
+        self.value_entry = ttk.Entry(values, textvariable=self.value)
         self.value_entry.grid(row=0, column=0, sticky="ew")
         self.value_entry.bind("<Return>", lambda _e: self.set_value())
         self.value_button = ttk.Button(values, text="套用欄位值", command=self.set_value)
         self.value_button.grid(row=0, column=1, padx=4)
+        suggestion_bar = ttk.Frame(values)
+        suggestion_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        suggestion_bar.columnconfigure(1, weight=1)
+        ttk.Label(suggestion_bar, text="建議值（可直接修改）").grid(row=0, column=0, sticky="w")
+        self.suggestion_box = ttk.Combobox(suggestion_bar, state="disabled")
+        self.suggestion_box.grid(row=0, column=1, sticky="ew", padx=4)
+        self.suggestion_button = ttk.Button(suggestion_bar, text="帶入建議值", command=self.use_suggestion)
+        self.suggestion_button.grid(row=0, column=2)
+        self.reference_info = tk.StringVar(self.window)
+        choice_bar = ttk.Frame(form)
+        choice_bar.grid(row=3, column=0, sticky="ew", pady=(5, 2))
+        choice_bar.columnconfigure(1, weight=1)
+        ttk.Label(choice_bar, text="缺少必填 choice 分支").grid(row=0, column=0, sticky="w")
+        self.choice_box = ttk.Combobox(choice_bar, state="disabled")
+        self.choice_box.grid(row=0, column=1, sticky="ew", padx=4)
+        self.choice_button = ttk.Button(choice_bar, text="加入 choice 分支", command=self.add_choice)
+        self.choice_button.grid(row=0, column=2, padx=4)
         more = ttk.Frame(form)
-        more.grid(row=3, column=0, sticky="ew", pady=5)
+        more.grid(row=4, column=0, sticky="ew", pady=2)
         more.columnconfigure(0, weight=1)
         self.child_box = ttk.Combobox(more, state="readonly")
         self.child_box.grid(row=0, column=0, sticky="ew")
         ttk.Button(more, text="新增子節點／項目", command=self.add_child).grid(row=0, column=1, padx=4)
         ttk.Button(more, text="移除範本節點", command=self.remove).grid(row=1, column=1, pady=4)
+        ttk.Label(form, textvariable=self.reference_info, wraplength=570, foreground="#64748c").grid(row=5, column=0, sticky="w")
         self.status = tk.StringVar(self.window, "請選擇要新增的節點")
         ttk.Label(self.window, textvariable=self.status, wraplength=1060, foreground="#b45309").grid(
             row=3, column=0, sticky="w", padx=10)
@@ -203,7 +282,12 @@ class CreationDialog:
         if chosen is not None:
             self.picker.selection_set(chosen)
             self.picker.see(chosen)
+            if preset is not None:
+                self.template = preset
+                self.previous_pick = chosen
+                self.rebuild()
         self.refresh_status()
+        self.refresh_choices()
         app._sync()
         self.window.grab_set()
 
@@ -212,6 +296,9 @@ class CreationDialog:
         query = self.search.get().casefold()
         for i, item in enumerate(self.catalog):
             label = item.info.module + ":" + local(item.info.path[-1])
+            branch = choice_label(self.schema, item.info)
+            if branch:
+                label += " [choice " + branch + "]"
             if query in (label + item.info.description + item.info.type_name).casefold():
                 self.picker.insert("", "end", iid=str(i), text=label, values=(item.info.kind,),
                     tags=() if item.allowed else ("blocked",))
@@ -257,6 +344,7 @@ class CreationDialog:
         self.tree.selection_set(chosen)
         self.tree.see(chosen)
         self.refresh_status()
+        self.refresh_choices()
 
     def selected_node(self):
         ids = self.tree.selection()
@@ -285,17 +373,53 @@ class CreationDialog:
         scalar = info.kind in {"leaf", "leaf-list"}
         self.value.set(node.text or "")
         secret = any(word in local(node.tag).lower() for word in ("password", "secret", "private-key"))
-        self.value_entry.configure(state="normal" if scalar else "disabled", show="•" if secret else "",
-            values=scalar_options(self.schema, info) if scalar else ())
+        self.value_entry.configure(state="normal" if scalar else "disabled", show="•" if secret else "")
+        self.suggestion_values = ()
+        self.suggestion_box.configure(values=(), state="disabled")
+        self.suggestion_box.set("請先選取 leaf")
+        self.suggestion_button.configure(state="disabled")
+        self.reference_info.set("")
+        reference_values = ()
+        if scalar:
+            from .leafrefs import resolve
+            indices = []
+            child = node
+            while child is not self.template.root:
+                indices.append(children(child.getparent()).index(child))
+                child = child.getparent()
+            try:
+                if self.path:
+                    context = deepcopy(self.parent)
+                    offset = len(children(context))
+                    context.append(deepcopy(self.template.root))
+                    selection = self.selection
+                    indices = (offset, *reversed(indices))
+                else:
+                    context = self.template.root
+                    selection = new_root_selection(context, self.schema)
+                    indices = tuple(reversed(indices))
+                references = resolve(self.schema, self.snapshot.data, selection, context, indices)
+                reference_values = references.values
+                self.reference_info.set("\n".join(dict.fromkeys(references.messages)))
+            except (EditError, AttributeError, IndexError):
+                self.reference_info.set("草稿上下文尚未完整，引用候選待伺服器驗證")
+            if not secret:
+                self.suggestion_values = suggested_values(self.schema, info, reference_values)
+                suggestion_labels = self.suggestion_values or ("（此欄位沒有 schema／可見資料建議值）",)
+                self.suggestion_box.configure(values=suggestion_labels,
+                                              state="readonly" if self.suggestion_values else "disabled")
+                self.suggestion_box.set(suggestion_labels[0])
+                self.suggestion_button.configure(state="normal" if self.suggestion_values else "disabled")
+            else:
+                self.suggestion_box.set("（敏感欄位不提供建議值）")
         self.value_button.configure(state="normal" if scalar else "disabled")
-        self.field_info.set(info.module + " · " + info.kind + " · " + info.type_name
-            + (" · presence: " + info.presence if info.presence else "") + "\n"
-            + (info.constraints or info.description)[:350])
+        self.field_info.set(field_info_text(info))
         self.child_options = [c.info for c in candidates(self.schema, node, path) if c.allowed] if not scalar else []
         self.child_box.configure(values=[i.module + ":" + local(i.path[-1]) + " (" + i.kind + ")" for i in self.child_options])
         self.child_box.set("")
         if self.child_options:
             self.child_box.current(0)
+        self.refresh_choices()
 
     def set_value(self):
         node = self.selected_node()
@@ -307,6 +431,14 @@ class CreationDialog:
         except Exception as exc:
             self.status.set(str(exc))
 
+    def use_suggestion(self):
+        index = self.suggestion_box.current()
+        if index < 0 or index >= len(self.suggestion_values):
+            return
+        self.value.set(self.suggestion_values[index])
+        self.value_entry.focus_set()
+        self.status.set("已帶入建議值；請確認後按『套用欄位值』。")
+
     def add_child(self):
         node, index = self.selected_node(), self.child_box.current()
         if node is None or index < 0:
@@ -314,6 +446,35 @@ class CreationDialog:
         try:
             new = self.template.add(node, self.child_options[index])
             self.rebuild(new)
+        except Exception as exc:
+            self.status.set(str(exc))
+
+    def refresh_choices(self):
+        """Expose missing mandatory choices from every level of the template.
+
+        The selected row may be a leaf (as in the transport issue), so choice
+        actions are deliberately not limited to that row's children. Each
+        option retains its owning parent and can add the branch directly.
+        """
+        if self.template is None:
+            self.choice_options = []
+        else:
+            self.choice_options = missing_choice_candidates(self.schema, self.template.root, self.template.path)
+        values = [option.label for option in self.choice_options]
+        self.choice_box.configure(values=values, state="readonly" if values else "disabled")
+        self.choice_box.set(values[0] if values else "目前沒有待選的必填 choice")
+        self.choice_button.configure(state="normal" if values else "disabled")
+
+    def add_choice(self):
+        index = self.choice_box.current()
+        if index < 0 or index >= len(self.choice_options):
+            return
+        option = self.choice_options[index]
+        try:
+            new = self.template.add(option.parent, option.info)
+            self.rebuild(new)
+            self.status.set("已加入 choice %s → %s；請繼續填寫該分支的必要欄位。" %
+                            (option.choice.name, option.branch))
         except Exception as exc:
             self.status.set(str(exc))
 
@@ -328,8 +489,12 @@ class CreationDialog:
     def refresh_status(self):
         issues = self.template.issues() if self.template else ["請選擇節點"]
         self.stage_button.configure(state="disabled" if issues else "normal")
-        self.status.set("；".join(issues[:3]) if issues else "本機檢查通過；完整 YANG 條件／權限仍需伺服器驗證。尚未送出。")
-        self.preview.set(serialize_xml(self.template.root).decode("utf-8") if self.template else "")
+        message = "；".join(issues[:3]) if issues else "本機檢查通過；完整 YANG 條件／權限仍需伺服器驗證。尚未送出。"
+        if any("choice" in issue for issue in issues):
+            message += "；請在『缺少必填 choice 分支』選擇並加入對應分支。"
+        self.status.set(message)
+        self.preview.set(serialize_xml(self.template.root, compact_namespaces=True).decode("utf-8")
+                         if self.template else "")
 
     def stage(self):
         try:
@@ -345,13 +510,19 @@ class CreationDialog:
                     raise EditError("請先按「套用欄位值」，避免遺漏尚未套用的輸入")
             result = append_template(self.schema, self.parent, self.path, self.template)
             if not self.path:
-                self.app.selection = new_root_selection(self.template.root, self.schema)
+                selection = new_root_selection(self.template.root, self.schema)
+                scope, source = self.app._draft_scope(), self.snapshot.options.source
+                prior = (self.app.drafts.matching(scope, source, selection, self.schema)
+                         or self.app.drafts.overlapping(scope, source, selection, self.schema))
+                if prior:
+                    raise EditError("此根節點範圍已有草稿；請從草稿清單開啟：" + prior.label)
+                self.app.selection = selection
                 self.app.selection_iid = None
                 self.app.tree.selection_remove(*self.app.tree.selection())
                 self.app.baseline_text = self.app.selection.text()
                 self.app.path_status.set("[新增草稿] /" + local(self.template.root.tag))
                 result = deepcopy(self.template.root)
-            self.app.editor.set(serialize_xml(result).decode("utf-8"))
+            self.app.editor.set(serialize_xml(result, compact_namespaces=True).decode("utf-8"))
             self.close()
             self.app._update_preview()
             self.app.status.set("已加入本機 XML 草稿；請檢查實際送出的 RPC，再選 NETCONF 或系統 sysrepocfg 修改。")

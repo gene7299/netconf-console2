@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlsplit
@@ -152,6 +153,7 @@ class SchemaIndex:
     choices: dict[str, ChoiceInfo] = field(default_factory=dict)
     statements: dict = field(default_factory=dict, repr=False, compare=False)
     modules: dict = field(default_factory=dict, repr=False, compare=False)
+    content_hash: str = ""
 
     def lookup(self, path: tuple[str, ...]) -> NodeInfo | None:
         return self.nodes.get(path)
@@ -162,6 +164,8 @@ class SchemaIndex:
     @classmethod
     def compile(cls, sources: dict[str, str], specs: list[ModuleSpec] | None = None):
         result = cls()
+        result.content_hash = hashlib.sha256(json.dumps({"sources": sources,
+            "specs": [asdict(spec) for spec in specs] if specs else None}, sort_keys=True).encode()).hexdigest()
         if not sources:
             result.complete = False
             result.warnings.append("No YANG schemas loaded; XML is read-only.")

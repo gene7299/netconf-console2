@@ -47,7 +47,7 @@ exportToColleague\
 ├── install-netconf-console2.ps1
 ├── run-netconf-console2.ps1
 ├── run-netconf-console2-gui.ps1
-├── netconf_console2-3.7.0-py3-none-any.whl   optional fallback
+├── netconf_console2-3.9.1-py3-none-any.whl   optional fallback
 ├── GUI_GUIDE_ZH_TW.md
 ├── COMMAND_REFERENCE_ZH_TW.md
 ├── INSTALL_WINDOWS.md
@@ -105,6 +105,11 @@ TLS Call Home：
 
 `--password` 不帶明文值時會顯示遮罩輸入。Call Home 需要 Windows Firewall
 允許指定的 inbound TCP port，並讓 O-RU 能路由到此 Windows 主機。
+
+GUI 的「系統 SSH／sysrepo」旁有「備份／還原」分頁，可在已授權的系統 SSH
+上建立含 UTC 時間的遠端 Sysrepo backup 目錄，保存 running XML、module 清單與
+SHA256；還原時會自動選最新且驗證通過的 running backup。完整的服務停止／恢復
+順序與限制請看 [GUI_GUIDE_ZH_TW.md](GUI_GUIDE_ZH_TW.md)。
 
 ## Pretty XML 與直接存檔
 

@@ -11,7 +11,7 @@ import time
 import tkinter as tk
 from copy import deepcopy
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from lxml import etree
 
@@ -21,7 +21,8 @@ from ..xmloutput import serialize_xml
 from . import VERSION
 from .client import GuiClient, ReadOptions, Snapshot
 from .model import EditError, Selection, build_plan, children, identity, local, node_style, parse_editor, xml_spans
-from .preferences import SSH_FIELDS, PreferencesStore, change_profiles, empty_book, public_book, remember_account, remember_connection
+from .preferences import (CONNECTION_ACCOUNT_FIELD, SSH_FIELDS, PreferencesStore, change_profiles,
+                           empty_book, public_book, remember_account, remember_connection)
 from .features import WorkspaceFeatures
 from .windows import icon_path, set_app_id
 
@@ -179,6 +180,9 @@ class NetconfWindow(WorkspaceFeatures):
         style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"))
         style.configure("Treeview", font=("Segoe UI", 10), rowheight=26)
         style.configure("TButton", padding=(9, 3))
+        # The workspace-wide summary row must stay compact enough to leave
+        # both XML panes usable at the minimum window size.
+        style.configure("Summary.TButton", padding=(6, -1), font=("Segoe UI", 9))
         # Vista draws native surfaces and ignores colour maps. Use only clam's
         # paintable border/tab elements, retaining the native theme elsewhere.
         for name, element in (("Action.Button.border", "Button.border"),
@@ -187,14 +191,15 @@ class NetconfWindow(WorkspaceFeatures):
                 style.element_create(name, "from", "clam", element)
         for name, colour, hover, pressed in (
                 ("Netconf.TButton", "#15803d", "#166534", "#14532d"),
-                ("Sysrepo.TButton", "#b91c1c", "#991b1b", "#7f1d1d")):
+                ("Sysrepo.TButton", "#b91c1c", "#991b1b", "#7f1d1d"),
+                ("Danger.TButton", "#b91c1c", "#991b1b", "#7f1d1d")):
             style.layout(name, [("Action.Button.border", {"sticky": "nswe", "children": [
                 ("Button.focus", {"sticky": "nswe", "children": [
                     ("Button.padding", {"sticky": "nswe", "children": [
                         ("Button.label", {"sticky": "nswe"})]})]})]})])
             style.configure(name, background=colour, foreground="white", bordercolor=colour,
                             lightcolor=colour, darkcolor=colour, font=("Segoe UI", 10, "bold"),
-                            padding=(12, 6), borderwidth=2)
+                            padding=(9, 3) if name == "Danger.TButton" else (12, 6), borderwidth=2)
             style.map(name, background=[("disabled", "#e2e8f0"), ("pressed", pressed), ("active", hover)],
                       foreground=[("disabled", "#64748b"), ("!disabled", "white")],
                       bordercolor=[("disabled", "#cbd5e1"), ("focus", "#0f172a")],
@@ -233,6 +238,7 @@ class NetconfWindow(WorkspaceFeatures):
         self.wrap_xml = tk.BooleanVar(root, True)
         self.connection_name = tk.StringVar(root, "")
         self.account_name = tk.StringVar(root, "")
+        self.connection_save_as = False
         self._build()
         self._build_features()
         self._restore_preferences()
@@ -353,6 +359,7 @@ class NetconfWindow(WorkspaceFeatures):
         ttk.Label(advanced, text="NETCONF version").grid(row=1, column=4, padx=6)
         ttk.Combobox(advanced, textvariable=self.vars["netconf_version"], values=("auto", "1.0", "1.1"), state="readonly", width=8).grid(row=1, column=5)
         exports = ttk.Frame(advanced)
+        self.settings_exports = exports
         exports.grid(row=2, column=0, columnspan=6, sticky="w", padx=7, pady=4)
         ttk.Button(exports, text="匯出設定 JSON（不含密碼）", command=self.export_settings).pack(side="left")
         ttk.Button(exports, text="匯出加密備份（含密碼）", command=lambda: self.export_settings(encrypted=True)).pack(side="left", padx=8)
@@ -373,14 +380,14 @@ class NetconfWindow(WorkspaceFeatures):
         left.rowconfigure(5, weight=1)
         left.columnconfigure(0, weight=1)
         tree_header = ttk.Frame(left)
-        tree_header.grid(row=0, column=0, sticky="ew", pady=(4, 6))
+        tree_header.grid(row=0, column=0, sticky="ew", pady=(2, 3))
         ttk.Label(tree_header, text="DATA TREE", font=("Segoe UI", 11, "bold")).pack(side="left")
         self.defaults_check = ttk.Checkbutton(left, text="包含 YANG default 值", variable=self.vars["defaults"], command=self._options_changed)
-        self.defaults_check.grid(row=1, column=0, sticky="w", pady=2)
+        self.defaults_check.grid(row=1, column=0, sticky="w")
         self.state_check = ttk.Checkbutton(left, text="包含 config false（唯讀）", variable=self.vars["state"], command=self._options_changed)
-        self.state_check.grid(row=2, column=0, sticky="w", pady=2)
+        self.state_check.grid(row=2, column=0, sticky="w")
         tree_buttons = ttk.Frame(left)
-        tree_buttons.grid(row=3, column=0, sticky="ew", pady=5)
+        tree_buttons.grid(row=3, column=0, sticky="ew", pady=(2, 1))
         self.read_all_button = ttk.Button(tree_buttons, text="重新讀取全部", command=self.read_all)
         self.read_all_button.pack(side="left")
         self.schema_button = ttk.Button(tree_buttons, text="更新 YANG", command=self.refresh_schema)
@@ -405,9 +412,22 @@ class NetconfWindow(WorkspaceFeatures):
         self.tree.bind("<Button-1>", self._tree_click)
         self.tree.bind("<Double-Button-1>", self._tree_double_click)
         self.tree.bind("<<TreeviewSelect>>", self._selected)
-        ttk.Label(left, textvariable=self.schema_status, wraplength=305).grid(row=6, column=0, sticky="w", pady=6)
-        self.details_button = ttk.Button(left, text="連線 / Schema 詳情", command=self.show_details)
-        self.details_button.grid(row=7, column=0, sticky="w")
+        # Keep the DATA TREE summary and operation progress on one row that
+        # spans both workspace panes.  A left-pane footer clips long status
+        # messages when the XML workspace is wide.
+        self.tree_footer = ttk.Frame(self.root)
+        self.tree_footer.pack(side="bottom", fill="x", padx=13, pady=(1, 7), before=main)
+        self.tree_footer.columnconfigure(2, weight=1)
+        self.schema_status_label = ttk.Label(self.tree_footer, textvariable=self.schema_status,
+                                             anchor="w", width=25)
+        self.schema_status_label.grid(row=0, column=0, sticky="w")
+        self.details_button = ttk.Button(self.tree_footer, text="連線 / Schema 詳情",
+                                         style="Summary.TButton", command=self.show_details)
+        self.details_button.grid(row=0, column=1, sticky="w", padx=(8, 0))
+        self.tree_status_label = ttk.Label(self.tree_footer, textvariable=self.status, anchor="w")
+        self.tree_status_label.grid(row=0, column=2, sticky="ew", padx=(8, 0))
+        self.progress = ttk.Progressbar(self.tree_footer, mode="indeterminate", length=135)
+        self.progress.grid(row=0, column=3, sticky="e", padx=(8, 0))
         top = ttk.Frame(right)
         bottom = ttk.Frame(right)
         right.add(top, weight=3)
@@ -455,17 +475,24 @@ class NetconfWindow(WorkspaceFeatures):
         self.reply = XmlPane(self.output_tabs, readonly=True)
         self.output_tabs.add(self.preview, text="待送出 RPC（唯讀）")
         self.output_tabs.add(self.reply, text="最後 RPC 回應")
-        foot = ttk.Frame(self.root)
-        # Reserve the status row before the expandable workspace. At Windows
-        # 125% scaling, the XML panes' requested sizes must not hide progress.
-        foot.pack(side="bottom", fill="x", padx=13, pady=(1, 7), before=main)
-        ttk.Label(foot, textvariable=self.status, wraplength=1200).pack(side="left", fill="x", expand=True)
-        self.progress = ttk.Progressbar(foot, mode="indeterminate", length=135)
-        self.progress.pack(side="right", padx=7)
 
     def _preference_values(self):
         return {**{name: variable.get() for name, variable in self.vars.items()},
                 "wrap_xml": self.wrap_xml.get()}
+
+    def _connection_profile_values(self, values=None):
+        """Return the complete, self-contained connection setting snapshot."""
+        profile = dict(values if values is not None else self._preference_values())
+        profile[CONNECTION_ACCOUNT_FIELD] = self.account_name.get().strip()
+        return profile
+
+    def _last_connection_name(self):
+        # Do not make an unsaved Save As draft look like a real profile after
+        # restarting the application.
+        name = self.connection_name.get().strip()
+        if self.connection_save_as and name not in self.preferences["connections"]:
+            return ""
+        return name
 
     def _set_preference_values(self, values):
         self.restoring_preferences = True
@@ -513,7 +540,7 @@ class NetconfWindow(WorkspaceFeatures):
             if self.preferences_store and Path(filename).resolve() == self.preferences_store.path.resolve():
                 raise ValueError("請另選匯出檔名，不能覆寫正在使用的設定檔。")
             book = deepcopy(self.preferences)
-            book["last"] = {"values": self._preference_values(), "connection": self.connection_name.get(),
+            book["last"] = {"values": self._preference_values(), "connection": self._last_connection_name(),
                             "account": self.account_name.get()}
             if encrypted:
                 PreferencesStore(filename).save(book)
@@ -563,8 +590,10 @@ class NetconfWindow(WorkspaceFeatures):
         if "SSH" in values["mode"]:
             name = self.account_name.get().strip()
             self.account_name.set(remember_account(self.preferences, values, name))
+        profile = self._connection_profile_values()
         name = self.connection_name.get().strip()
-        self.connection_name.set(remember_connection(self.preferences, values, name))
+        self.connection_name.set(remember_connection(self.preferences, profile, name))
+        self.connection_save_as = False
         self._profile_lists()
 
     def _save_preferences(self, *, remember=False, notify=False):
@@ -576,7 +605,7 @@ class NetconfWindow(WorkspaceFeatures):
         if remember:
             self._remember_current()
         self.preferences["last"] = {"values": self._preference_values(),
-                                    "connection": self.connection_name.get(), "account": self.account_name.get()}
+                                    "connection": self._last_connection_name(), "account": self.account_name.get()}
         if self.preferences_store is None:
             return True
         try:
@@ -594,13 +623,27 @@ class NetconfWindow(WorkspaceFeatures):
     def save_connection(self):
         if self.busy or self.client.connected:
             return
+
+        name = self.connection_name.get().strip()
+        if self.connection_save_as:
+            if not name:
+                name = self._ask_new_connection_name()
+                if name is None:
+                    return
+                self.connection_name.set(name)
+            if name in self.preferences["connections"]:
+                messagebox.showerror("另存新組", "連線設定組名稱已存在，請使用其他名稱；不會覆寫舊設定。", parent=self.root)
+                return
+
         values = self._preference_values()
-        self.connection_name.set(remember_connection(self.preferences, values, self.connection_name.get()))
         if "SSH" in values["mode"]:
             self.account_name.set(remember_account(self.preferences, values, self.account_name.get()))
+        profile = self._connection_profile_values()
+        self.connection_name.set(remember_connection(self.preferences, profile, name))
+        self.connection_save_as = False
         self._profile_lists()
         if self._save_preferences(notify=True):
-            self.status.set("已儲存連線設定（包含加密認證資料）")
+            self.status.set("已儲存連線設定（包含 NETCONF、SSH/TLS、跳板與 sysrepocfg 設定）")
 
     def save_account(self):
         if self.busy or self.client.connected:
@@ -619,8 +662,16 @@ class NetconfWindow(WorkspaceFeatures):
         values = self.preferences["connections"].get(self.connection_name.get())
         if values is not None:
             self._set_preference_values(values)
-            account = {key: values[key] for key in SSH_FIELDS if key in values}
-            self.account_name.set(next((name for name, item in self.preferences["accounts"].items() if item == account), ""))
+            linked_account = values.get(CONNECTION_ACCOUNT_FIELD, "")
+            account_name = linked_account.strip() if isinstance(linked_account, str) else ""
+            if account_name not in self.preferences["accounts"]:
+                # Legacy profiles did not carry the account catalog name;
+                # retain their previous exact-match behaviour on load.
+                account = {key: values[key] for key in SSH_FIELDS if key in values}
+                account_name = next((name for name, item in self.preferences["accounts"].items()
+                                     if item == account), "")
+            self.account_name.set(account_name)
+            self.connection_save_as = False
             self._save_preferences()
             self._sync()
 
@@ -633,10 +684,29 @@ class NetconfWindow(WorkspaceFeatures):
             self._save_preferences()
 
     def new_connection(self):
+        if self.busy or self.client.connected:
+            return
         self._save_preferences()
-        self.connection_name.set("")
+        name = self._ask_new_connection_name()
+        if name is None:
+            return
+        self.connection_save_as = True
+        self.connection_name.set(name)
         self.connection_box.focus_set()
-        self.status.set("沿用目前欄位；輸入新名稱與設定，再按儲存或連線。")
+        self.status.set("已建立另存新組草稿「%s」；可修改所有欄位，再按儲存或連線。" % name)
+
+    def _ask_new_connection_name(self):
+        name = simpledialog.askstring("另存新組", "新的連線設定組名稱：", parent=self.root)
+        if name is None:
+            return None
+        name = name.strip()
+        if not name:
+            self.status.set("連線設定組名稱不可為空白；尚未建立新組。")
+            return None
+        if name in self.preferences["connections"]:
+            messagebox.showerror("另存新組", "連線設定組名稱已存在，請使用其他名稱；原設定未變更。", parent=self.root)
+            return None
+        return name
 
     def new_account(self):
         self.account_name.set("")
@@ -658,7 +728,7 @@ class NetconfWindow(WorkspaceFeatures):
             if self.preferences_error:
                 raise ValueError(self.preferences_error)
             book = deepcopy(self.preferences)
-            book["last"] = {"values": self._preference_values(), "connection": self.connection_name.get(),
+            book["last"] = {"values": self._preference_values(), "connection": self._last_connection_name(),
                             "account": self.account_name.get()}
             changed = change_profiles(book, group, names, new_name)
             # Commit ciphertext before changing UI state; failures leave both
@@ -793,7 +863,8 @@ class NetconfWindow(WorkspaceFeatures):
         if self.busy:
             return
         if self.client.connected and not self._rpc_allowed() and label not in {
-                "中斷連線…", "關閉連線…", "連線系統 SSH…", "中斷系統 SSH…", "系統 SSH 修改…"}:
+                "中斷連線…", "關閉連線…", "連線系統 SSH…", "中斷系統 SSH…", "系統 SSH 修改…",
+                "系統備份：檢查初始化…", "系統備份：建立…", "系統備份：尋找最新…", "系統備份：還原中…"}:
             self.status.set("事件訂閱中且 server 不支援 interleave；請先停止訂閱（中斷連線）。")
             return
         self.busy, self.job_name = True, label
@@ -840,12 +911,15 @@ class NetconfWindow(WorkspaceFeatures):
                         return
                     self._audit_result(previous_operation, "完成；結果待確認" if self.uncertain else "完成", previous_device)
                 else:
+                    if previous_job in {"送出修改中…", "系統 SSH 修改…"}:
+                        self._finish_attempt(error=value)
                     if previous_job == "訂閱事件…" and self.client.connected:
                         # A lost reply does not prove that create-subscription
                         # failed. Keep non-interleave RPCs blocked until close.
                         self.notification_manager = self.client.manager
                         self.notification_status.set("訂閱結果待確認；請停止（中斷連線）後再試，不會自動重訂閱。")
-                    if previous_job in {"送出修改中…", "確認限時提交…", "取消限時提交…", "系統 SSH 修改…"} or previous_job.startswith("設定操作："):
+                    if previous_job in {"送出修改中…", "確認限時提交…", "取消限時提交…", "系統 SSH 修改…",
+                                        "系統備份：還原中…"} or previous_job.startswith("設定操作："):
                         self.uncertain = True
                     elif self.snapshot is not None:
                         for name in ("source", "defaults", "state"):
@@ -863,6 +937,7 @@ class NetconfWindow(WorkspaceFeatures):
             pass
         self._poll_notifications()
         self._poll_confirmed()
+        self._poll_leaf_editor()
         self._monitor_connection()
         if self.root.winfo_exists():
             self.root.after(80, self._poll)
@@ -949,7 +1024,12 @@ class NetconfWindow(WorkspaceFeatures):
             messagebox.showerror("NETCONF", text, parent=self.root)
 
     def _discard(self):
-        return not self.dirty or messagebox.askyesno("尚未送出的修改", "放棄目前尚未送出的修改？", parent=self.root)
+        if not self.dirty:
+            return True
+        if not messagebox.askyesno("尚未送出的修改", "放棄目前尚未送出的修改及這份本機草稿？", parent=self.root):
+            return False
+        self._forget_active_draft()
+        return True
 
     @property
     def dirty(self):
@@ -963,7 +1043,7 @@ class NetconfWindow(WorkspaceFeatures):
             return
         if not self._save_preferences(remember=True, notify=True):
             return
-        if not self._discard():
+        if not self._preserve_current_draft(flush=True):
             return
         self.reconnect_enabled = False
         self.reconnect_due = None
@@ -987,7 +1067,8 @@ class NetconfWindow(WorkspaceFeatures):
 
     def disconnect(self):
         if self.busy:
-            if self.job_name in {"送出修改中…", "確認限時提交…", "取消限時提交…", "系統 SSH 修改…"} or self.job_name.startswith("設定操作："):
+            if self.job_name in {"送出修改中…", "確認限時提交…", "取消限時提交…", "系統 SSH 修改…",
+                                 "系統備份：還原中…"} or self.job_name.startswith("設定操作："):
                 messagebox.showinfo("正在送出", "請等待這次 RPC 完成，避免結果不明。", parent=self.root)
                 return
             self.reconnect_enabled = False
@@ -998,7 +1079,7 @@ class NetconfWindow(WorkspaceFeatures):
             # Once the active job finishes, close through the same serial worker.
             self.root.after(150, self._disconnect_when_idle)
             return
-        if not self._pending_close_allowed() or not self._discard():
+        if not self._pending_close_allowed() or not self._preserve_current_draft(flush=True):
             return
         self.reconnect_enabled = False
         self.reconnect_due = None
@@ -1011,6 +1092,7 @@ class NetconfWindow(WorkspaceFeatures):
             self._run("中斷連線…", self.client.disconnect, lambda _result: self._clear_connection())
 
     def _clear_connection(self):
+        self.drafts.invalidate()
         self.notification_manager = None
         self.notification_status.set("未訂閱；連線已中斷。")
         self.diff_pane.set("")
@@ -1026,7 +1108,7 @@ class NetconfWindow(WorkspaceFeatures):
         self.status.set("已中斷連線")
 
     def _options_changed(self, _event=None):
-        if not self._discard():
+        if not self._preserve_current_draft():
             if self.snapshot:
                 for name in ("source", "defaults", "state"):
                     self.vars[name].set(getattr(self.snapshot.options, name))
@@ -1110,9 +1192,28 @@ class NetconfWindow(WorkspaceFeatures):
             return "break"
         if "indicator" in self.tree.identify_element(event.x, event.y).lower():
             return self._tree_click(event)
+        if iid in self.items:
+            info = self.client.schema.lookup(self.items[iid].path)
+            if info and info.kind in {"leaf", "leaf-list"}:
+                if self.busy:
+                    if self.job_name == "重新讀取所選節點…" and self.selection_iid == iid:
+                        self.pending_leaf_bookmark = self._bookmark()
+                    return "break"
+                if self.selection_iid != iid:
+                    if not self._preserve_current_draft():
+                        return "break"
+                    self._show_selection(iid)
+                self.open_leaf_editor()
+                return "break"
 
     def _expand(self, _event=None):
         iid = self.tree.focus()
+        if iid in self.creation_candidates:
+            # Candidate rows use a private child only to obtain the normal
+            # Treeview '+' indicator; they are opened by double-clicking the
+            # candidate itself, never by revealing a blank placeholder row.
+            self.tree.item(iid, open=False)
+            return
         if iid in self.items:
             self._expand_item(iid)
 
@@ -1201,23 +1302,139 @@ class NetconfWindow(WorkspaceFeatures):
                 label += "[" + ", ".join(local(key) + "=" + repr(node.findtext(key)) for key in info.keys) + "]"
             parts.append(label)
         self.path_status.set("/" + "/".join(parts))
+        self._restore_selected_draft()
         self._update_preview()
+
+    def _find_tree_iid(self, selection):
+        """Find a materialized DATA TREE item by its schema-aware identity."""
+        wanted = self._bookmark(selection)
+        if wanted is None:
+            return None
+        for iid, item in self.items.items():
+            if not self.tree.exists(iid) or not item.exists:
+                continue
+            if self._bookmark(item) == wanted:
+                return iid
+        return None
+
+    def delete_selected(self):
+        """Stage removal of one existing child in its parent's XML draft.
+
+        The parent is selected deliberately: build_plan can then express a
+        missing child as a normal NETCONF ``remove`` operation while retaining
+        list keys and the rest of the parent's addressing context.
+        """
+        selection = self.selection
+        if not selection or not self.snapshot:
+            self.status.set("請先讀取並選取要刪除的節點。")
+            return
+        if self.busy or self.lifecycle_dialog or self._pending():
+            return
+        if self.snapshot.options.source == "startup":
+            self.status.set("startup 唯讀；請切換 running/candidate。")
+            return
+        if not selection.exists or not selection.ancestors:
+            self.status.set("目前只能刪除有父節點的資料節點；根節點請從其父層範圍處理。")
+            return
+        info = self.client.schema.lookup(selection.path)
+        if info is None or info.config is not True:
+            self.status.set("config false／未知 schema 節點不能刪除。")
+            return
+        parent_info = self.client.schema.lookup(selection.path[:-1])
+        if parent_info and selection.path[-1] in parent_info.keys:
+            self.status.set("list key 是識別欄位，不能單獨刪除；請刪除整個 list 項目。")
+            return
+        guard = self._draft_guard()
+        if guard and not guard.startswith("此範圍"):
+            self.status.set(guard)
+            return
+        source = self.snapshot.options.source
+        try:
+            ancestor_drafts = self.drafts.ancestor_entries(self._draft_scope(), source,
+                                                            selection, self.client.schema)
+        except EditError as exc:
+            self.status.set(str(exc))
+            return
+        if ancestor_drafts:
+            self.status.set("目前範圍包含既有父層草稿；請先從草稿清單開啟父層草稿。")
+            return
+        selected_path = self.path_status.get()
+        if not self._discard():
+            return
+        # _discard() only removes a draft when it was dirty.  Clean stale
+        # entries must also be cleared before changing the selected scope.
+        self._forget_active_draft()
+        try:
+            overlapping = self.drafts.descendant_entries(self._draft_scope(), source,
+                                                         selection, self.client.schema)
+        except EditError as exc:
+            self.status.set(str(exc))
+            return
+        parent_node = selection.ancestors[-1]
+        parent_selection = Selection(parent_node, selection.ancestors[:-1])
+        parent_iid = self._find_tree_iid(parent_selection)
+        if parent_iid is None:
+            self._error(EditError("找不到選取節點的父層；請重新讀取後再試。"))
+            return
+        draft_backup = {entry.key: entry for entry in overlapping}
+        draft_note = ""
+        if draft_backup:
+            labels = "\n".join("- " + entry.label for entry in list(draft_backup.values())[:8])
+            more = "" if len(draft_backup) <= 8 else "\n- …（其餘 %d 份）" % (len(draft_backup) - 8)
+            draft_note = ("\n\n選取範圍內還有 %d 份子節點草稿；刪除後會一併丟棄，"
+                          "避免子草稿再次阻擋父層刪除：\n%s%s" %
+                          (len(draft_backup), labels, more))
+        stale_note = ("\n\n目前資料快照尚未重新確認；這次只建立草稿，送出前必須重新讀取／比對。"
+                      if self.uncertain else "")
+        if not messagebox.askyesno(
+                "確認刪除整個節點",
+                "將在本機 XML 草稿中移除：\n%s\n\n"
+                "這只會產生 edit-config remove 預覽，不會立即修改設備；"
+                "請之後檢查 RPC，再按送出。%s%s" % (selected_path, draft_note, stale_note),
+                parent=self.root, default="no"):
+            return
+        try:
+            for key in draft_backup:
+                self.drafts.entries.pop(key, None)
+            self._show_selection(parent_iid)
+            edited = parse_editor(self.editor.get())
+            wanted = identity(selection.node, self.client.schema, selection.path)
+            matches = [child for child in children(edited)
+                       if child.tag == selection.node.tag
+                       and identity(child, self.client.schema, selection.path) == wanted]
+            if len(matches) != 1:
+                raise EditError("父層 XML 找不到唯一的選取節點；請重新讀取父層。")
+            edited.remove(matches[0])
+            self.editor.set(serialize_xml(edited).decode("utf-8"))
+            self.tree.selection_set(parent_iid)
+            self.tree.focus(parent_iid)
+            self.tree.item(parent_iid, open=True)
+            self._update_preview()
+            if not self.plan or self.plan.rpc is None or self.plan.removals < 1:
+                raise EditError("刪除預覽未產生 remove 操作；請重新讀取父節點後再試。")
+            self._schedule_drafts()
+            self.status.set("已在父層草稿標記刪除 %s；尚未送出。" % local(selection.node.tag))
+        except Exception as exc:
+            self.drafts.entries.update(draft_backup)
+            self._schedule_drafts()
+            self._error(exc)
 
     def _selected(self, _event=None):
         ids = self.tree.selection()
         if not ids or ids[0] not in self.items:
             return
         iid = ids[0]
-        if self.selection is self.items[iid]:
+        if self.selection_iid == iid:
             return
-        if self.busy or not self._discard():
+        if self.busy or self.lifecycle_dialog or not self._preserve_current_draft():
             if self.selection_iid and self.tree.exists(self.selection_iid):
                 self.tree.selection_set(self.selection_iid)
             return
         self._show_selection(iid)
         # A click presents the snapshot immediately and rereads that root from
         # the peer. Root subtree filters also work without XPath capability.
-        self.refresh_selected(discard_checked=True)
+        if not self._active_draft():
+            self.refresh_selected(discard_checked=True)
 
     def refresh_selected(self, discard_checked=False):
         if not self.selection or not self.snapshot:
@@ -1261,17 +1478,24 @@ class NetconfWindow(WorkspaceFeatures):
             if target == "startup" and self.dirty:
                 raise EditError("startup is read-only in this GUI; select running/candidate before editing.")
             self.plan = build_plan(self.selection, text, self.client.schema, target)
+            self._apply_rollback_option()
             self.editor.annotate(self.plan.edited, self.selection.path, self.client.schema, self.plan.changed)
             self.preview.set(self.plan.wire_xml)
             if self.plan.rpc is not None:
                 self.preview_status.set("%d 項變更 / %d 項移除 → %s · 尚未送出；不會自動 commit 或保存 startup" % (len(self.plan.changes), self.plan.removals, target))
             else:
                 self.preview_status.set("尚無變更，不會送出任何設定")
+            self._capture_draft()
         except Exception as exc:
+            self.plan = None
             self.preview.set("")
             self.preview_status.set("無法送出：" + str(exc))
             try:
                 self.editor.annotate(parse_editor(text), self.selection.path, self.client.schema)
+            except Exception:
+                pass
+            try:
+                self._capture_draft()
             except Exception:
                 pass
         self._update_diff()
@@ -1327,7 +1551,7 @@ class NetconfWindow(WorkspaceFeatures):
         if not self.client.connected or not self._rpc_allowed():
             return
         self._update_preview()
-        if not self.plan or self.plan.rpc is None or self.uncertain or self.busy:
+        if not self.plan or self.plan.rpc is None or self.uncertain or self.busy or self._draft_guard():
             return
         plan, selection, options = self.plan, self.selection, self.snapshot.options
         summary = "\n".join(plan.changes[:12])
@@ -1338,11 +1562,30 @@ class NetconfWindow(WorkspaceFeatures):
         if not messagebox.askyesno("確認送出 NETCONF 修改", question, parent=self.root, default="no"):
             return
         self.last_sent_xml = plan.wire_xml
+        self._begin_attempt(selection, plan, options, "NETCONF")
+        sent_draft = self._active_draft()
+        if sent_draft:
+            sent_draft.session = None
+            sent_draft.status = "已送出／待讀回確認"
         def done(result):
             self.reply.set(result.reply)
+            self._finish_attempt(result.snapshot)
             self.output_tabs.select(self.reply)
             if result.snapshot is not None:
-                self._accept_snapshot(result.snapshot)
+                from .client import locate, config_semantic
+                try:
+                    actual = locate(result.snapshot.data, selection, self.client.schema)
+                    matched = config_semantic(actual, selection.path, self.client.schema) == config_semantic(plan.edited, selection.path, self.client.schema)
+                except EditError:
+                    matched = False
+                if matched:
+                    if sent_draft:
+                        self.drafts.entries.pop(sent_draft.key, None)
+                        self._schedule_drafts()
+                    self._accept_snapshot(result.snapshot)
+                else:
+                    self.uncertain = True
+                    result.warnings.append("讀回與草稿不符；草稿保留且禁止重送，請核對設備。")
             else:
                 self.uncertain = True
                 self.plan = None
@@ -1363,10 +1606,14 @@ class NetconfWindow(WorkspaceFeatures):
         pane.set("\n".join(lines))
 
     def close(self):
-        if self.busy and (self.job_name in {"送出修改中…", "確認限時提交…", "取消限時提交…", "系統 SSH 修改…"} or self.job_name.startswith("設定操作：")):
+        if self.diagnostic_dialog and self.diagnostic_dialog.running:
+            self.diagnostic_dialog.close()
+            return
+        if self.busy and (self.job_name in {"送出修改中…", "確認限時提交…", "取消限時提交…", "系統 SSH 修改…",
+                                             "系統備份：還原中…"} or self.job_name.startswith("設定操作：")):
             messagebox.showinfo("正在送出", "請等待 RPC 完成後再關閉。", parent=self.root)
             return
-        if not self._pending_close_allowed() or not self._discard():
+        if not self._pending_close_allowed() or not self._preserve_current_draft(flush=True):
             return
         if not self._save_preferences(notify=True):
             if not messagebox.askyesno("尚未儲存設定", "設定無法儲存，仍要關閉視窗？原設定檔不會被覆寫。",
@@ -1410,7 +1657,10 @@ def main(argv=None):
     parser.add_argument("--self-test", metavar="REPORT_JSON", help="Run GUI/runtime diagnostics without a remote connection")
     parser.add_argument("--loopback-test", metavar="SETTINGS_JSON", help="Developer diagnostic; requires --self-test and a loopback-only test peer")
     parser.add_argument("--sysrepo-loopback-test", metavar="SETTINGS_JSON", help="Developer diagnostic; synthetic loopback system SSH only")
+    parser.add_argument("--connection-diagnostic-test", metavar="SETTINGS_JSON", help="Developer phase diagnostic; synthetic numeric loopback only")
     args = parser.parse_args(argv)
+    if args.connection_diagnostic_test and (not args.self_test or args.loopback_test or args.sysrepo_loopback_test):
+        parser.error("--connection-diagnostic-test requires --self-test and cannot combine with other peer tests")
     if args.loopback_test and not args.self_test:
         parser.error("--loopback-test requires --self-test REPORT_JSON")
     if args.sysrepo_loopback_test and (not args.self_test or args.loopback_test):
@@ -1422,8 +1672,10 @@ def main(argv=None):
         window.load_demo()
     if args.self_test:
         from .diagnostics import self_test, loopback_test, sysrepo_loopback_test
+        from .connection_diagnostics import loopback_diagnostic
         try:
-            report = (sysrepo_loopback_test(args.sysrepo_loopback_test) if args.sysrepo_loopback_test else
+            report = (loopback_diagnostic(args.connection_diagnostic_test) if args.connection_diagnostic_test else
+                      sysrepo_loopback_test(args.sysrepo_loopback_test) if args.sysrepo_loopback_test else
                       loopback_test(args.loopback_test) if args.loopback_test else self_test(window))
             Path(args.self_test).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
             return 0 if report["passed"] else 1

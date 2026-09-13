@@ -59,6 +59,7 @@ class Peer:
             "urn:ietf:params:netconf:capability:candidate:1.0",
             "urn:ietf:params:netconf:capability:startup:1.0",
             "urn:ietf:params:netconf:capability:validate:1.1",
+            "urn:ietf:params:netconf:capability:rollback-on-error:1.0",
             "urn:ietf:params:netconf:capability:confirmed-commit:1.1",
             "urn:ietf:params:netconf:capability:notification:1.0",
             "urn:ietf:params:netconf:capability:interleave:1.0",
@@ -236,6 +237,8 @@ def main():
                 raise AssertionError("Loopback peer failed")
             if peer.received_edit != report["wire_xml"]:
                 raise AssertionError("Sent XML differs from the GUI preview")
+            if "rollback-on-error" not in peer.received_edit or "rollback-on-error" not in report.get("test_xml", ""):
+                raise AssertionError("Missing explicitly requested rollback-on-error")
             if peer.lifecycle_xml != report.get("lifecycle_xml") or peer.locks:
                 raise AssertionError("Lifecycle preview/lock mismatch")
             if peer.test_xml != report.get("test_xml") or peer.confirmed_token is not None:

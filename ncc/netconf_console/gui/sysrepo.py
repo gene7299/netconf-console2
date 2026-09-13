@@ -162,7 +162,7 @@ class ShellConnection:
                     status = channel.recv_exit_status()
                     if status != 0 or offset != len(payload):
                         detail = redact_secrets(stderr.decode("utf-8", errors="replace"))[:4000]
-                        raise EditError("sysrepocfg exit=%s；%s\n不會自動重送。" % (status, detail))
+                        raise EditError("系統 SSH 命令 exit=%s；%s\n不會自動重送。" % (status, detail))
                     return bytes(stdout), bytes(stderr)
                 if channel.closed:
                     raise ConnectionError("系統 SSH 中斷，未取得完整執行結果。")

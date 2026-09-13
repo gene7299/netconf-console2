@@ -145,6 +145,82 @@ def self_test(window):
         draft = window.editor.get()
         window._refresh_creation_candidates()
         check("Candidate hints preserve draft", bool(window.creation_candidates) and draft == window.editor.get())
+        check("Cross-node draft shelf retains independent entries", len(window.drafts.entries) >= 2)
+        from .drafts import DraftShelf
+        with tempfile.TemporaryDirectory(prefix="netconf-draft-self-test-") as folder:
+            shelf = DraftShelf(Path(folder) / "drafts.nccdrafts")
+            shelf.entries = dict(window.drafts.entries)
+            shelf.save()
+            restored = DraftShelf(shelf.path)
+            restored.load()
+            check("Frozen encrypted draft restart requires recheck", not restored.load_error
+                and len(restored.entries) == len(shelf.entries)
+                and all(entry.session is None for entry in restored.entries.values())
+                and b"urn:create-test" not in shelf.path.read_bytes())
+        from .leaf_editor import LeafDialog
+        from .demo import DemoClient
+        window.client = DemoClient()
+        window._accept_snapshot(window.client.read(ReadOptions(defaults=True, state=True)))
+        window._expand_item("0")
+        window._show_selection("0/1")
+        form = LeafDialog(window, etree.fromstring(window.editor.get().encode()))
+        window.root.update()
+        description = next(i for i, (_, info, _, _) in form.fields.items() if info.path[-1].endswith("}description"))
+        form.tree.selection_set(description)
+        form.select()
+        form.value.set("Frozen form draft")
+        form.stage()
+        check("Frozen existing-leaf form stages locally", "Frozen form draft" in window.editor.get()
+              and not window.client.sent)
+        from .leafrefs import resolve
+        refs_schema = SchemaIndex.compile({"r": 'module r {namespace "urn:r";prefix r;leaf-list ids {type string;}leaf ref {type leafref {path "/r:ids";}}}'})
+        refs_data = etree.fromstring(b'<data><ids xmlns="urn:r">fixture</ids><ref xmlns="urn:r">fixture</ref></data>')
+        from .model import Selection
+        check("Frozen context-aware leafref candidates", resolve(refs_schema, refs_data, Selection(refs_data[1]), refs_data[1]).values == ["fixture"])
+        from . import templates, reconcile
+        template, removed = templates.from_node(window.client.schema, window.selection, etree.fromstring(window.editor.get().encode()))
+        check("Frozen list clone clears keys and state", bool(template.pending) and "oper-status" not in etree.tostring(template.root).decode())
+        with tempfile.TemporaryDirectory(prefix="netconf-template-test-") as folder:
+            path = Path(folder) / "library.ncctemplate"
+            templates.save_template(path, template, window.client.schema)
+            loaded = templates.load_template(path, window.client.schema)
+            check("Frozen schema-bound DPAPI template library", loaded.path == template.path and bool(loaded.pending)
+                and b"Frozen form draft" not in path.read_bytes())
+        from copy import deepcopy
+        mine, fresh = etree.fromstring(window.editor.get().encode()), deepcopy(window.snapshot.data)
+        fresh[0][1].find("{urn:ietf:params:xml:ns:yang:ietf-interfaces}description").text = "remote description"
+        latest, rows = reconcile.compare(window.selection, mine, fresh, window.client.schema, "running")
+        check("Frozen three-way conflict requires explicit choice", any(not row.choice for row in rows))
+        for row in rows:
+            row.choice = "mine"
+        baseline, merged = reconcile.resolve_rows(window.selection, latest, rows, window.client.schema, "running")
+        check("Frozen three-way merge remains a local draft", "Frozen form draft" in merged and not window.client.sent)
+        from .profile_import_ui import ProfileImportDialog
+        imported = empty_book()
+        imported["connections"]["fixture import"] = {"host": "fixture.invalid"}
+        profile = ProfileImportDialog(window, imported, False)
+        check("Frozen profile import preview defaults unchecked", bool(profile.rows) and not any(row[0] for row in profile.rows.values()))
+        profile.close()
+        from .profile_exchange import read_import
+        with tempfile.TemporaryDirectory(prefix="netconf-profile-test-") as folder:
+            path = Path(folder) / "settings.json"
+            imported["last"] = {"values": window._preference_values()}
+            path.write_text(json.dumps(imported), encoding="utf-8")
+            restored, encrypted = read_import(path, window._preference_values())
+            check("Frozen exported GUI fields import with wrap setting", not encrypted
+                and "wrap_xml" in restored["last"]["values"])
+        from .connection_diagnostics import DiagnosticRun, report_text
+        from .diagnostic_ui import DiagnosticDialog
+        from ..session import ConnectionSettings
+        import threading
+        diagnostic = DiagnosticRun(ConnectionSettings(host="private.fixture", username="private-user"), threading.Event())
+        diagnostic.phase("tcp", "start")
+        diagnostic.phase("tcp", "done", "192.0.2.9:830")
+        check("Frozen diagnostic report redacts identifiers", "private.fixture" not in report_text(diagnostic.report)
+              and "private-user" not in report_text(diagnostic.report) and "192.0.2.9" not in report_text(diagnostic.report))
+        dialog = DiagnosticDialog(window, ConnectionSettings(host="fixture.invalid"))
+        check("Frozen diagnostic dialog never connects before Start", not dialog.running and dialog.report is None)
+        dialog.close()
         report["passed"] = True
     except Exception as exc:
         report["error"] = type(exc).__name__ + ": " + str(exc)
@@ -218,6 +294,15 @@ def loopback_test(filename):
             raise AssertionError("Missing fixture data")
         selection = Selection(interface, (interface.getparent(),))
         plan = build_plan(selection, selection.text().replace(">1500<", ">9000<"), client.schema)
+        if not any(":rollback-on-error:" in cap for cap in client.capabilities):
+            raise AssertionError("Fixture must advertise rollback-on-error")
+        from ..xmloutput import serialize_xml
+        from ncclient.xml_ import to_xml
+        option = etree.Element("{%s}error-option" % NC)
+        option.text = "rollback-on-error"
+        plan.rpc[0].insert(len(plan.rpc[0]) - 1, option)
+        plan.rpc = etree.fromstring(serialize_xml(plan.rpc))
+        plan.wire_xml = to_xml(plan.rpc)
         report["checks"].append("Running + defaults + config false retrieval")
         from . import safety, events
         test_rpc = safety.draft_rpc(plan)

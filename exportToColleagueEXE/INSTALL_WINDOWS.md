@@ -3,7 +3,20 @@
 此資料夾是 Windows x64 單檔執行版，不包含原始碼、Python wheel、測試或建置
 腳本。同事只需 Windows 10/11；不必安裝 Python、pip 或 Python 相依套件。
 
-## 獨立 GUI（3.7.0）
+## 獨立 GUI（3.9.1）
+
+3.9.1 修正新增節點的必填 YANG choice 分支：choice/case 不會偽造成 XML 標籤；
+例如 `transport` 會列出可加入的 `transport → ssh`／`transport → tls` 具體節點，
+即使目前選取其他 leaf 也能直接加入草稿。
+
+3.9.0 完成第 4～7 項：list 複製／個人範本庫、三方衝突與送出結果核對、設定匯入分享、
+分階段連線診斷與遮蔽報告。入口位於「工具」、進階頁與右下「送出結果核對」。
+rollback-on-error 預設關閉，需 server 宣告支援；所有合併／範本仍只產生本機草稿。
+詳見 GUI_GUIDE_ZH_TW.md 開頭。原本 CLI EXE 保持不變。
+
+3.8.0 新增「草稿清單」：跨節點保留修改，Windows DPAPI 加密保存，重開後必須重新比對設備。
+另有「表單編輯 leaf／引用…」修改既有欄位、提供 leafref 候選及跳至引用目標。
+所有表單只更新草稿，不自動送出。詳見 GUI_GUIDE_ZH_TW.md 開頭的操作步驟與限制。
 
 3.7.0 新增 DATA TREE「新增子節點…／新增根節點…」及可新增節點提示。
 可依設備 schema 逐層建立 leaf、container、list、leaf-list，填完後只加入 XML 草稿；
@@ -45,6 +58,11 @@ SSH 認證方式與獨立私鑰密碼、搜尋與 YANG 欄位說明、XML 匯入
 經明確確認將最小 running 變更 XML 送給 sysrepocfg stdin。不會在 NETCONF 拒絕權限時自動改用 root。
 遠端須有 sysrepocfg；Windows 不需安裝它。WSL Docker 情境請確認 SSH port 對應的是 O-RU 容器。
 修改前比對、修改後讀回；不保存 startup，不重送。stdin 模式的 --lock 存在版本差異，詳見操作說明。
+
+同一個「系統 SSH／sysrepo」區域另有「備份／還原」分頁：可將 running（及選用的
+candidate/startup）匯出到遠端 UTC 時間目錄，保存 `modules.txt` 與 `SHA256SUMS`；
+還原只套用最新且驗證通過的 `running.xml`，並在明確確認後停止／恢復相關服務。
+完整操作與安全限制請看 [GUI_GUIDE_ZH_TW.md](GUI_GUIDE_ZH_TW.md)。
 
 ```powershell
 .\netconf-console2-gui.exe

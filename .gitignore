@@ -35,3 +35,7 @@ gui-operations.json
 .gui-audit-*
 *.nccbackup
 .nccbackup-*
+*.nccdrafts
+.nccdrafts-*
+*.ncctemplate
+.ncctemplate-*

@@ -179,6 +179,9 @@ class GuiClient:
         target = plan.rpc.find("{urn:ietf:params:xml:ns:netconf:base:1.0}edit-config/{urn:ietf:params:xml:ns:netconf:base:1.0}target")
         if target is None or len(target) != 1 or etree.QName(target[0]).localname != options.source:
             raise EditError("Preview target differs from the source snapshot; reload before sending.")
+        error_option = plan.rpc.findtext("{urn:ietf:params:xml:ns:netconf:base:1.0}edit-config/{urn:ietf:params:xml:ns:netconf:base:1.0}error-option")
+        if error_option == "rollback-on-error" and not any(cap.split("?", 1)[0] == "urn:ietf:params:netconf:capability:rollback-on-error:1.0" for cap in self.capabilities):
+            raise EditError("Server does not advertise :rollback-on-error; no edit sent.")
         # A lock spans conflict detection and this single edit. Never force an
         # unlock, commit candidate, or copy running to startup automatically.
         manager = self.manager

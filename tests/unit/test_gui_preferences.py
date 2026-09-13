@@ -1,4 +1,5 @@
 """Persistence uses synthetic credentials and an isolated directory only."""
+from copy import deepcopy
 import os
 import ssl
 import tempfile
@@ -115,6 +116,70 @@ class PreferencesTests(unittest.TestCase):
             self.assertEqual(restored.vars["cert"].get(), expected["cert"])
         finally:
             restored._destroy()
+
+    def test_save_as_creates_new_complete_connection_bundle(self):
+        root = tk.Tk()
+        root.withdraw()
+        app = NetconfWindow(root, store=self.store)
+        try:
+            app.connection_name.set("Original")
+            app.account_name.set("Original account")
+            app.vars["mode"].set("Direct SSH")
+            app.vars["host"].set("old.invalid")
+            app.vars["username"].set("old-user")
+            app.vars["password"].set("old-netconf-secret")
+            app.vars["jump_enabled"].set(True)
+            app.vars["jump_host"].set("old-jump")
+            app.vars["jump_username"].set("old-jump-user")
+            app.vars["jump_password"].set("old-jump-secret")
+            app.vars["admin_host"].set("old-admin")
+            app.vars["admin_username"].set("old-admin-user")
+            app.vars["admin_password"].set("old-admin-secret")
+            app.vars["admin_program"].set("sysrepocfg-old")
+            app.vars["admin_timeout"].set("11")
+            app.save_connection()
+            original = deepcopy(app.preferences["connections"]["Original"])
+
+            with patch("netconf_console.gui.app.simpledialog.askstring", return_value="New bundle"):
+                app.new_connection()
+            self.assertTrue(app.connection_save_as)
+            self.assertEqual(app.connection_name.get(), "New bundle")
+
+            app.account_name.set("New account")
+            app.vars["host"].set("new.invalid")
+            app.vars["username"].set("new-user")
+            app.vars["password"].set("new-netconf-secret")
+            app.vars["jump_host"].set("new-jump")
+            app.vars["jump_password"].set("new-jump-secret")
+            app.vars["admin_host"].set("new-admin")
+            app.vars["admin_password"].set("new-admin-secret")
+            app.vars["admin_program"].set("sysrepocfg-new")
+            app.vars["admin_timeout"].set("22")
+            app.save_connection()
+
+            self.assertEqual(set(app.preferences["connections"]), {"Original", "New bundle"})
+            self.assertEqual(app.preferences["connections"]["Original"], original)
+            bundle = app.preferences["connections"]["New bundle"]
+            self.assertEqual(bundle["account_name"], "New account")
+            self.assertTrue(set(app._preference_values()).issubset(bundle))
+            for key, expected in {
+                "host": "new.invalid", "username": "new-user", "password": "new-netconf-secret",
+                "jump_host": "new-jump", "jump_password": "new-jump-secret",
+                "admin_host": "new-admin", "admin_password": "new-admin-secret",
+                "admin_program": "sysrepocfg-new", "admin_timeout": "22",
+            }.items():
+                self.assertEqual(bundle[key], expected, key)
+            self.assertFalse(app.connection_save_as)
+
+            app.connection_name.set("Original")
+            app._choose_connection()
+            self.assertEqual(app.vars["host"].get(), "old.invalid")
+            self.assertEqual(app.vars["password"].get(), "old-netconf-secret")
+            self.assertEqual(app.vars["jump_host"].get(), "old-jump")
+            self.assertEqual(app.vars["admin_program"].get(), "sysrepocfg-old")
+            self.assertEqual(app.account_name.get(), "Original account")
+        finally:
+            app._destroy()
 
     def test_connect_has_no_host_key_warning_and_remembers_history(self):
         root = tk.Tk()

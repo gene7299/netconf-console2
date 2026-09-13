@@ -18,6 +18,96 @@ class Candidate:
         return not self.reason
 
 
+@dataclass(frozen=True)
+class ChoiceCandidate:
+    """A concrete data node that represents one branch of a YANG choice.
+
+    ``choice``/``branch`` are schema metadata only: YANG choices and cases do
+    not appear as XML elements.  Keeping the owning parent here lets the UI
+    add a branch even when the user currently has a leaf selected.
+    """
+
+    parent: object
+    parent_path: tuple[str, ...]
+    choice_key: str
+    choice: object
+    branch: str
+    candidate: Candidate
+
+    @property
+    def info(self):
+        return self.candidate.info
+
+    @property
+    def allowed(self):
+        return self.candidate.allowed
+
+    @property
+    def label(self):
+        return "%s → %s | %s:%s (%s)" % (
+            self.choice.name, self.branch, self.info.module, local(self.info.path[-1]), self.info.kind)
+
+
+def choice_label(schema, info):
+    """Return human-readable choice/case labels for a data node."""
+    labels = []
+    for key, branch in info.choices:
+        choice = schema.choices.get(key)
+        labels.append((choice.name + " → " if choice else "") + branch)
+    return ", ".join(labels)
+
+
+def choice_candidates(schema, parent, path, *, mandatory_only=True):
+    """List concrete branch nodes that can be added at ``parent``.
+
+    A choice/case is schema-only and therefore cannot be selected as an XML
+    node.  This helper resolves it to the actual first data node in each case,
+    which is what ``Template.add`` needs.  It is intentionally based on the
+    same ``candidates`` result used by the normal child picker so max-elements,
+    config and feature checks cannot diverge between the two UI paths.
+    """
+    present = children(parent)
+    active = {}
+    for node in present:
+        info = schema.lookup(path + (node.tag,))
+        if info:
+            for key, branch in info.choices:
+                active.setdefault(key, set()).add(branch)
+    result = []
+    direct = candidates(schema, parent, path)
+    for key, choice in schema.choices.items():
+        if choice.parent != path:
+            continue
+        if mandatory_only and not choice.mandatory:
+            continue
+        if choice.conditions or key in active:
+            continue
+        if not all(active.get(outer_key) == {outer_branch}
+                   for outer_key, outer_branch in choice.outer):
+            continue
+        for candidate in direct:
+            branches = [branch for choice_key, branch in candidate.info.choices if choice_key == key]
+            for branch in branches:
+                result.append(ChoiceCandidate(parent, path, key, choice, branch, candidate))
+    return result
+
+
+def missing_choice_candidates(schema, root, path):
+    """Find unresolved mandatory choices throughout a creation template."""
+    result = []
+
+    def walk(node, node_path):
+        info = schema.lookup(node_path)
+        if info is None or info.kind not in {"container", "list"}:
+            return
+        result.extend(choice_candidates(schema, node, node_path))
+        for child in children(node):
+            walk(child, node_path + (child.tag,))
+
+    walk(root, path)
+    return result
+
+
 def candidates(schema, parent, path):
     """Compare effective schema with a data parent (or the NETCONF data root)."""
     present = children(parent)
@@ -71,6 +161,14 @@ def scalar_options(schema, info):
     return info.defaults
 
 
+def suggested_values(schema, info, reference_values=()):
+    """Return non-binding values that can help a user fill a scalar leaf."""
+    if info.kind not in {"leaf", "leaf-list"}:
+        return ()
+    values = [*info.defaults, *scalar_options(schema, info), *(reference_values or ())]
+    return tuple(dict.fromkeys(str(value) for value in values if value is not None))
+
+
 def validate_scalar(schema, info, node):
     """Use compiled types, not textual constraint heuristics. XPath needs server."""
     stmt = schema.statements.get(info.path)
@@ -80,6 +178,11 @@ def validate_scalar(schema, info, node):
         return  # Hand-built diagnostic schemas may not carry pyang statements.
     text = node.text or ""
     name = getattr(spec, "name", "")
+    if name == "leafref":
+        target = getattr(spec, "i_target_node", None)
+        target_path = next((path for path, statement in schema.statements.items() if statement is target), None)
+        if target_path and target_path != info.path:
+            return validate_scalar(schema, schema.lookup(target_path), node)
     if name == "empty":
         if text:
             raise EditError("empty 型別必須為空元素")
@@ -106,6 +209,39 @@ def validate_scalar(schema, info, node):
     errors = []
     if not spec.validate(errors, stmt.pos, value, stmt.i_module) or errors:
         raise EditError("值不符合 YANG 型別／range／length／pattern：" + info.type_name)
+
+
+def scalar_input(schema, info, node, value):
+    """Bind a canonical module:identity choice locally without rebinding siblings."""
+    result = deepcopy(node)
+    effective = info
+    visited = set()
+    while effective.path not in visited:
+        visited.add(effective.path)
+        stmt = schema.statements.get(effective.path)
+        typ = stmt.search_one("type") if stmt is not None else None
+        spec = getattr(typ, "i_type_spec", None)
+        if getattr(spec, "name", "") != "leafref":
+            break
+        target = getattr(spec, "i_target_node", None)
+        path = next((path for path, s in schema.statements.items() if s is target), None)
+        if path is None:
+            break
+        effective = schema.lookup(path)
+    if getattr(spec, "name", "") == "identityref" and value in scalar_options(schema, effective):
+        module, ident = value.split(":", 1)
+        uri = next(uri for uri, name in schema.namespaces.items() if name == module)
+        prefix = next((p for p, u in node.nsmap.items() if p and u == uri), None)
+        if prefix is None:
+            prefix = module
+            while prefix in node.nsmap and node.nsmap[prefix] != uri:
+                prefix += "_yang"
+            result = etree.Element(node.tag, nsmap={**node.nsmap, prefix: uri}, attrib=dict(node.attrib))
+            result.tail = node.tail
+        value = prefix + ":" + ident
+    result.text = value or None
+    validate_scalar(schema, info, result)
+    return result
 
 
 class Template:

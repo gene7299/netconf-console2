@@ -352,6 +352,28 @@ startup datastore：
 | 新 module 初始資料 | `sysrepocfg -W initial.xml -m MODULE` | 先安裝 schema，再 `edit-config` | `-W` 是 Sysrepo 安裝排程前的本機功能 |
 | 下載 module schema | 不適用 | `get-schema MODULE --out FILE` | 只保存到 client 本機 |
 
+## GUI 遠端 Sysrepo 備份／還原
+
+GUI 的「備份／還原」分頁會透過已連線的「系統 SSH／sysrepo」執行固定且受驗證的
+命令，不接受任意 shell。預設遠端 BASE 是 `/data/backup-yang-baseline`，每次建立
+UTC 時間目錄；running 必備，candidate/startup 可選：
+
+```sh
+sysrepocfg --export="$DEST/running.xml" --datastore=running --format=xml
+sysrepoctl -l > "$DEST/modules.txt"
+(cd "$DEST" && sha256sum ./*.xml > SHA256SUMS)
+```
+
+「從最新備份還原 running」會自動尋找最新時間目錄、執行
+`sha256sum -c SHA256SUMS`，再在明確確認及服務停止後執行：
+
+```sh
+sysrepocfg --copy-from="$LATEST/running.xml" --datastore=running --format=xml
+```
+
+只還原 running，不會自動還原 candidate/startup、安裝 YANG、commit 或重送其他 XML；
+詳細服務清單、權限需求與失敗處理請看 `GUI_GUIDE_ZH_TW.md`。
+
 ## O-RAN 常用驗證範例
 
 確認 `oranuser2` 是否存在於 startup：

@@ -26,7 +26,10 @@ def draft_rpc(plan):
         raise EditError("只接受標準 edit-config 草稿。")
     option = etree.Element("{%s}test-option" % NC)
     option.text = "test-only"
-    op.insert(list(op).index(op.find("{%s}config" % NC)), option)
+    following = op.find("{%s}error-option" % NC)
+    if following is None:
+        following = op.find("{%s}config" % NC)
+    op.insert(list(op).index(following), option)
     return rpc
 
 
@@ -36,6 +39,8 @@ def test_draft(client, selection, plan, options, rpc):
     if getattr(client, "pending_commit", None) is not None:
         raise EditError("限時提交尚未結束。")
     expected = draft_rpc(plan)
+    if plan.rpc.findtext("{%s}edit-config/{%s}error-option" % (NC, NC)) == "rollback-on-error" and not has_cap(client, "rollback-on-error:1.0"):
+        raise EditError("Server 未宣告 rollback-on-error；不送出測試 RPC")
     expected.set("message-id", rpc.get("message-id"))
     if to_xml(rpc) != to_xml(expected):
         raise EditError("test-only RPC 與草稿不一致。")

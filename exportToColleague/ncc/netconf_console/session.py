@@ -29,6 +29,12 @@ from .trace import TraceSink
 LOGGER = logging.getLogger(__name__)
 
 
+def _phase(session, name, state, detail=""):
+    callback = getattr(session, "_console_phase", None)
+    if callback is not None:
+        callback(name, state, detail)
+
+
 @dataclass
 class ConnectionSettings:
     """Resolved connection settings shared by direct and Call Home flows."""
@@ -114,13 +120,24 @@ class TracedSSHSession(transport.SSHSession):
         super().send(message)
 
     def _auth(self, username, password, key_filenames, allow_agent, look_for_keys):
+        _phase(self, "handshake", "done")
+        _phase(self, "auth", "start")
         mode = getattr(self, "_console_auth_mode", "legacy")
         if mode == "legacy":
-            return super()._auth(username, password, key_filenames, allow_agent, look_for_keys)
-        from .sshauth import authenticate
-        return authenticate(self._transport, username, password, key_filenames,
-                            allow_agent, look_for_keys, mode,
-                            getattr(self, "_console_key_passphrase", None))
+            result = super()._auth(username, password, key_filenames, allow_agent, look_for_keys)
+        else:
+            from .sshauth import authenticate
+            result = authenticate(self._transport, username, password, key_filenames,
+                                  allow_agent, look_for_keys, mode,
+                                  getattr(self, "_console_key_passphrase", None))
+        _phase(self, "auth", "done")
+        _phase(self, "hello", "start")  # Includes opening the NETCONF subsystem.
+        return result
+
+    def _post_connect(self, timeout=60):
+        result = super()._post_connect(timeout)
+        _phase(self, "hello", "done")
+        return result
 
     def _dispatch_message(self, raw: str | bytes) -> Any:
         if self._console_trace:
@@ -245,10 +262,11 @@ class TracedTLSSession(transport.TLSSession):
         settings: ConnectionSettings,
         host: str | None,
     ) -> None:
-        context = build_tls_context(settings)
         server_name = settings.tls_server_name or host
         wrapped = None
         try:
+            _phase(self, "auth", "start")
+            context = build_tls_context(settings)
             wrapped = context.wrap_socket(
                 sock,
                 server_hostname=server_name if server_name else None,
@@ -256,11 +274,14 @@ class TracedTLSSession(transport.TLSSession):
             )
             wrapped.settimeout(settings.timeout if settings.timeout else None)
             wrapped.do_handshake()
+            _phase(self, "auth", "done")
             self._host = host
             self._socket = wrapped
             self._connected = True
             self._closing.clear()
+            _phase(self, "hello", "start")
             self._post_connect(timeout=settings.timeout)
+            _phase(self, "hello", "done")
         except Exception as exc:
             self._connected = False
             self._socket = None
@@ -283,7 +304,9 @@ class TracedTLSSession(transport.TLSSession):
         if not settings.host:
             raise TLSError("Missing host")
         try:
+            _phase(self, "tcp", "start")
             sock = socket.create_connection((settings.host, settings.port), timeout=settings.timeout)
+            _phase(self, "tcp", "done", str(sock.getpeername()) if getattr(self, "_console_phase", None) else "")
         except OSError as exc:
             raise TLSError("Could not connect to %s:%s" % (settings.host, settings.port)) from exc
         self._connect_socket(sock, settings, settings.host)
@@ -429,6 +452,7 @@ def _prepare_known_hosts(session: Any, settings: ConnectionSettings) -> None:
 def open_direct(
     settings: ConnectionSettings,
     trace: TraceSink | None = None,
+    phase=None,
 ) -> tuple[Any, SessionMetadata]:
     """Open a direct SSH or TLS manager and return its metadata."""
 
@@ -437,18 +461,34 @@ def open_direct(
         raise ValueError("SSH 跳板只適用 Direct SSH。")
     raw_file = settings.raw_file
     session: Any | None = None
+    owned_socket = None
     try:
         if settings.transport == "tls":
             session = TracedTLSSession(handler, trace, raw_file)
+            session._console_phase = phase
             session.connect(settings)
         elif settings.transport == "ssh":
             session = TracedSSHSession(handler, trace, raw_file)
+            session._console_phase = phase
             _prepare_known_hosts(session, settings)
             jump_options = {}
             if settings.jump_enabled:
                 from .jump import open_jump
+                if phase:
+                    phase("jump", "start", "SSH 跳板認證及 TCP 轉送")
                 session._console_jump, jump_channel = open_jump(settings)
                 jump_options["sock"] = jump_channel
+                if phase:
+                    phase("jump", "done")
+                    phase("tcp", "done", "經跳板轉送；耗時計入 jump")
+            elif phase:
+                phase("tcp", "start")
+                owned_socket = socket.create_connection((settings.host, settings.port), timeout=settings.timeout,
+                    source_address=(settings.bind, 0) if settings.bind else None)
+                jump_options["sock"] = owned_socket
+                phase("tcp", "done", str(owned_socket.getpeername()))
+            if phase:
+                phase("handshake", "start", "SSH 金鑰交換與 host key 驗證")
             session.connect(
                 host=settings.host,
                 port=settings.port,
@@ -482,6 +522,8 @@ def open_direct(
         else:
             raise ValueError("Unsupported transport %r" % settings.transport)
     except Exception:
+        if owned_socket is not None:
+            owned_socket.close()
         if session is not None:
             try:
                 session.close()
@@ -510,14 +552,20 @@ def open_call_home(
     cancel_event: threading.Event | None = None,
     on_waiting: Callable[[str], None] | None = None,
     on_accepted: Callable[[str], None] | None = None,
+    phase=None,
 ) -> tuple[Any, SessionMetadata]:
     """Listen once and establish an SSH or TLS Call Home NETCONF session."""
 
     if settings.jump_enabled:
         raise ValueError("SSH 跳板不支援 Call Home；請關閉跳板選項。")
     port = settings.listen_port
+    if phase:
+        phase("listen", "start")
     with CallHomeListener(settings.listen_host, port, settings.timeout) as listener:
         listen_address = listener.listen_address or "%s:%s" % (settings.listen_host, port)
+        if phase:
+            phase("listen", "done", listen_address)
+            phase("tcp", "start", "等待設備接入")
         if on_waiting:
             on_waiting(listen_address)
         accepted, peer = listener.accept(cancel_event)
@@ -526,12 +574,18 @@ def open_call_home(
         peer_port = int(peer[1]) if isinstance(peer, tuple) and len(peer) > 1 else None
         if on_accepted:
             on_accepted(peer_address)
+        if phase:
+            phase("tcp", "done", peer_address)
         accepted.settimeout(settings.timeout if settings.timeout else None)
 
     handler = _handler_for(settings)
+    session = None
     try:
         if settings.transport == "ssh":
             session = TracedSSHSession(handler, trace, settings.raw_file)
+            session._console_phase = phase
+            if phase:
+                phase("handshake", "start", "SSH 金鑰交換與 host key 驗證")
             _prepare_known_hosts(session, settings)
             # RFC 8071 reverses the TCP initiator, not the SSH/TLS role.  The
             # accepted socket therefore enters ncclient's normal SSH-client
@@ -552,6 +606,7 @@ def open_call_home(
             )
         elif settings.transport == "tls":
             session = TracedTLSSession(handler, trace, settings.raw_file)
+            session._console_phase = phase
             # RFC 8071/RFC 7589 require the NETCONF client to remain the TLS
             # client.  This is the project-local accepted-socket extension;
             # ncclient.manager.call_home() currently routes accepted sockets to
@@ -561,6 +616,11 @@ def open_call_home(
             accepted.close()
             raise ValueError("Call Home transport must be ssh or tls")
     except Exception:
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                LOGGER.debug("Ignoring Call Home cleanup failure", exc_info=True)
         try:
             accepted.close()
         except OSError:
