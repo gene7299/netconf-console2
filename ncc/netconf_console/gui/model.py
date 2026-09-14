@@ -86,6 +86,7 @@ class Selection:
     node: etree._Element
     ancestors: tuple[etree._Element, ...] = ()
     exists: bool = True
+    delete: bool = False
 
     @property
     def path(self):
@@ -142,7 +143,7 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
         raise EditError("Keep the selected root name and namespace unchanged.")
     if target not in {"running", "candidate", "startup"}:
         raise EditError("Unsupported edit target.")
-    if selection.exists and semantic(before) == semantic(edited):
+    if not selection.delete and selection.exists and semantic(before) == semantic(edited):
         return plan
     if not selection.exists and selection.ancestors:
         raise EditError("Only a root creation can use an absent baseline.")
@@ -252,15 +253,27 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
 
     # Keys of the selected list, or a selected key leaf, must remain stable.
     selected_info = require_writable(selection.path)
-    if selected_info.kind == "leaf-list" and value_identity(before) != value_identity(edited):
-        raise EditError("To change a leaf-list value, select its parent so the preview can remove the old value and add the new one.")
-    if selected_info.kind == "list" and identity(before, schema, selection.path) != identity(edited, schema, selection.path):
-        raise EditError("The selected list key cannot be changed in place.")
-    if selection.ancestors:
-        parent = schema.lookup(selection.path[:-1])
-        if parent and before.tag in parent.keys:
-            raise EditError("List key leaves are identifiers and cannot be edited in place.")
-    fragment = difference(before if selection.exists else None, edited, selection.path)
+    if selection.delete:
+        # A deletion is an explicit user action, including when the selected
+        # node is a top-level presence container or list instance.  Keeping a
+        # key shell is enough to address a list; leaf-list values are retained
+        # because NETCONF needs the value to identify the instance.
+        fragment = _key_shell(before, selected_info)
+        if selected_info.kind == "leaf-list":
+            fragment.text = before.text
+        fragment.set("{%s}operation" % NC, "remove")
+        plan.changes.append("REMOVE " + "/".join(map(local, selection.path)))
+        plan.removals += 1
+    else:
+        if selected_info.kind == "leaf-list" and value_identity(before) != value_identity(edited):
+            raise EditError("To change a leaf-list value, select its parent so the preview can remove the old value and add the new one.")
+        if selected_info.kind == "list" and identity(before, schema, selection.path) != identity(edited, schema, selection.path):
+            raise EditError("The selected list key cannot be changed in place.")
+        if selection.ancestors:
+            parent = schema.lookup(selection.path[:-1])
+            if parent and before.tag in parent.keys:
+                raise EditError("List key leaves are identifiers and cannot be edited in place.")
+        fragment = difference(before if selection.exists else None, edited, selection.path)
     if fragment is None:
         return plan
     for index in range(len(selection.ancestors) - 1, -1, -1):

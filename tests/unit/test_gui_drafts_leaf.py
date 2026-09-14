@@ -85,6 +85,18 @@ class DraftModelTests(unittest.TestCase):
             with self.assertRaises(etree.XMLSyntaxError):
                 build_plan(restored.selection, restored.text, self.schema)
 
+    def test_delete_mark_is_preserved_in_encrypted_draft(self):
+        selection = Selection(self.data[0], (), True, True)
+        entry = self.capture(selection=selection, text=selection.text())
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "drafts.nccdrafts"
+            self.shelf.path = path
+            self.shelf.save()
+            loaded = DraftShelf(path)
+            loaded.load()
+            self.assertFalse(loaded.load_error)
+            self.assertTrue(loaded.entries[entry.key].selection.delete)
+
     def test_corrupt_or_encryption_failure_preserves_original(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "drafts.nccdrafts"

@@ -160,6 +160,34 @@ Call Home adapters, with running as its default source. It provides an expandabl
 instance tree, schema-aware default/state/change colours, an XML editor and an
 exact outgoing edit-config preview. Network and schema work runs in the background.
 
+## PySide6 GUI
+
+The Windows GUI now uses PySide6/Qt as its primary interface. The original
+Tk/ttk implementation remains available as `netconf-console2-gui-tk` during
+the migration. Install the optional Qt dependency with `py -3 -m pip install
+".[gui]"`, then run:
+
+```powershell
+netconf-console2-gui --demo
+```
+
+The Qt workspace uses a responsive splitter layout, Qt model/view widgets and
+`QThread` backend workers. It supports Direct SSH/TLS, SSH/TLS Call Home,
+jump-host settings, profile persistence, schema loading, default/state display
+options, editable XML, Pretty formatting, node creation/deletion, NETCONF
+edit-config, system SSH/sysrepocfg, backup/restore, event notifications,
+drafts, diagnostics and operation-result checking. The build command creates
+the primary standalone `exportToColleagueEXE/netconf-console2-gui.exe`:
+
+```powershell
+py -3 -m pip install PyInstaller
+.\packaging\build-windows-gui-qt.ps1
+```
+
+The `netconf-console2-gui-tk` entry point is retained as a fallback for older
+workflows; new Windows deployments should use `netconf-console2-gui` or the
+single `netconf-console2-gui.exe` file. No duplicate `-qt.exe` alias is shipped.
+
 Schema-driven child/root creation forms can seed required fields and list keys,
 show optional candidate hints, and stage new containers, leaves and list entries.
 New data uses explicit `create`; existing drafts are preserved and nothing is sent

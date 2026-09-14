@@ -18,10 +18,16 @@ setup(
         "pyang>=2.7,<3",
         "tomli>=2.0.0; python_version < '3.11'",
     ],
-    extras_require={"interactive": []},
+    extras_require={
+        "interactive": [],
+        "gui": ["PySide6>=6.7,<7"],
+    },
     entry_points={
         "console_scripts": ["netconf-console2=netconf_console.ncc:main"],
-        "gui_scripts": ["netconf-console2-gui=netconf_console.gui.app:main"],
+        "gui_scripts": [
+            "netconf-console2-gui=netconf_console.gui.qt_app:main",
+            "netconf-console2-gui-tk=netconf_console.gui.app:main",
+        ],
     },
     include_package_data=True,
     package_data={"netconf_console.gui": ["assets/*.ico"]},

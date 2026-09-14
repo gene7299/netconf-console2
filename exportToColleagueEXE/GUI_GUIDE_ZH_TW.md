@@ -1,5 +1,27 @@
 # NETCONF Windows GUI 操作說明（3.9.1）
 
+## PySide6 GUI
+
+`netconf-console2-gui.exe` 的 GUI 入口已改為 PySide6；原本的 Tk/ttk 介面仍可用
+`netconf-console2-gui-tk` 作為相容備援。PySide6 使用 Qt model/view、可拖曳
+splitter 與 `QThread` backend worker，支援四種 NETCONF 連線模式、profile／帳號保存、
+YANG schema、DATA TREE、自由 XML 編輯、Pretty、節點新增／刪除、NETCONF edit-config、
+系統 SSH/sysrepocfg、備份／還原、通知、草稿與診斷。建置方式為：
+
+```powershell
+py -3 -m pip install ".[gui]" PyInstaller
+.\packaging\build-windows-gui-qt.ps1
+```
+
+測試 Qt 版離線介面：
+
+```powershell
+netconf-console2-gui --demo
+```
+
+Qt 版使用同一套 NETCONF／YANG／sysrepo backend，不會另行推測 schema 語意。
+Windows 發行版只提供 `netconf-console2-gui.exe`，不再建立內容相同的 `-qt` 別名檔。
+
 ## 3.9.1：新增節點的必填 choice 分支
 
 YANG 的 `choice` 與 `case` 是 schema-only 結構，不會直接出現在 XML；例如
@@ -166,10 +188,11 @@ NETCONF server 驗證。可先做 test-only（需 server 支援），不會改�
 
 1. 連線並讀取 running（或 candidate），確認 YANG schema 載入完整。
 2. 例如已有 `ietf-netconf-server:netconf-server`，但沒有 `call-home`：
-   選取 `netconf-server`，按 DATA TREE 下的「新增子節點…」，選擇 `call-home`。
-   若連 `netconf-server` 都沒有，按「新增根節點…」選它。
-3. 表單左側列出目前這一層的 schema 候選；可搜尋名稱／module／說明。
-   灰色項目會說明不可新增的原因（已存在、config false、達到上限、另一分支已存在）。
+   選取 `netconf-server`，按右鍵選「新增子節點／list 項目…」，再選擇 `call-home`。
+   若連 `netconf-server` 都沒有，在 DATA TREE 空白處按右鍵選「新增根 YANG 節點…」。
+3. 表單左側預設只列出目前這一層可建立的 schema 候選；可搜尋名稱／module／說明。
+   需要診斷時可勾選「顯示不可新增節點」，才會以灰色列出已存在、config false、
+   達到上限或另一 choice 分支已存在等項目及原因。
 4. 右側選取 container，使用下方候選清單和「新增子節點／項目」逐層建立：
    例如 `call-home → netconf-client → endpoints → endpoint`，再選設備 schema
    提供的 SSH 或 TLS 分支。list 的 key、mandatory 與 min-elements 欄位會產生待填提示。
@@ -182,8 +205,13 @@ NETCONF server 驗證。可先做 test-only（需 server 支援），不會改�
    確認後才使用「NETCONF方式修改」或「使用系統sysrepocfg修改」送出。
    不會自動 commit candidate 或保存 startup；「還原」可放棄新根節點草稿。
 
-勾選「顯示可新增節點」後，DATA TREE 會以灰色標示候選，並在左側展開指示器欄顯示「＋」；候選會與相同階層節點對齊，雙擊可開啟表單。
+勾選「顯示可新增節點」後，DATA TREE 會以灰色標示候選，並在左側展開指示器欄顯示「＋」；候選會與相同階層節點對齊。在候選節點按右鍵選「建立此候選節點…」；雙擊只用於展開、收合或選取，不會建立節點。
 提示來自 schema 與上次讀取的資料，不是設備實際資料；不會混入 DATA TREE XML 匯出。
+
+DATA TREE 標題右側的搜尋欄會搜尋目前完整快照中的節點名稱、instance path、值與
+YANG description，尚未展開的節點也能找到。結果只顯示命中節點及其父階層；清空
+搜尋欄即可恢復一般樹狀檢視。為避免極大資料樹影響操作，每次最多顯示 500 筆命中項目。
+
 **未讀到不保證不存在**：可能是 NACM 過濾、隱含 default 或 when 條件。
 新增使用 `nc:operation="create"`，遇到設備已存在的同名節點／相同 list key 會拒絕，
 不會默默覆寫；既有 leaf 修改仍用 merge，刪除仍用 remove。送出前會再次讀取比對。
@@ -206,8 +234,9 @@ Source / Target 初次開啟預設為 `running`。
 連線設定各分頁以粗體與邊框區隔，目前選中的分頁為藍底白字。
 
 GUI 是獨立的 `netconf-console2-gui.exe`，不取代原本的 CLI
-`netconf-console2.exe`。Windows x64 EXE 已包含 Python、Tk/ttk、ncclient、
-SSH/TLS 與 pyang，相同資料夾內不需要原始碼，也不需另裝 Python。
+`netconf-console2.exe`。Windows x64 EXE 已包含 Python、PySide6/Qt、ncclient、
+SSH/TLS 與 pyang，相同資料夾內不需要原始碼，也不需另裝 Python；Tk/ttk
+仍保留在原始碼安裝的 `netconf-console2-gui-tk` 備援入口。
 
 ## 啟動
 
@@ -274,17 +303,21 @@ IP/port，Windows 防火牆也必須允許該 port；GUI 不會自動更改防�
 
 ## 多組連線、SSH 帳號與下次還原
 
-頂部改為「連線設定組」清單，不再顯示 NETCONF / XML WORKSPACE 橫幅。
+「NETCONF連線」是設定區的第一個分頁，內含連線設定組、模式、位址、port、
+Source / Target 與連線按鈕；不再顯示 NETCONF / XML WORKSPACE 橫幅。
 
 - 填完設定後按「連線 / 開始監聽」，即會加入使用過的連線與 SSH 帳號清單，
   包含連線失敗的嘗試。已選取／輸入既有名稱時，更新該組快照，不另建 `(2)`。
   關閉視窗只保存目前欄位，不再自動新增清單項目。
 - 可在「連線設定組」輸入名稱，按「儲存連線設定」。同名儲存會更新該組快照；
-  「另存新組」會先要求一個新的、不重複的名稱，再沿用目前欄位建立新組，
+  「另存新組」會先要求一個新的、不重複的名稱，並立即保存目前所有欄位，
   不會因欄位內容相同而誤回存到舊組。選取清單項目會還原該組的完整快照：
   模式、位址、連接埠、Source / Target、認證、TLS 路徑、SAN、驗證選項、逾時、
   讀取選項、SSH 跳板及系統 SSH／sysrepocfg 設定；SSH／TLS／跳板／系統 SSH
   密碼會與其他 GUI 設定一樣使用 Windows DPAPI 保存。
+- 連線、跳板與系統 SSH 的密碼／私鑰密語欄位依操作需求直接顯示文字，不使用圓點遮罩；
+  使用者應避免螢幕分享或讓未授權人員接觸畫面。保存到本機時仍使用 Windows DPAPI，
+  診斷與操作紀錄仍會遮蔽密碼。
 - SSH 認證頁另有「SSH 帳號組」清單。「新增帳號」清空帳號、密碼及 SSH key 路徑；
   「儲存帳號」保存這組帳號、密碼、key 路徑及 agent／搜尋金鑰選項。
   要保留同帳號不同認證，請按「新增帳號」後填入，或輸入另一個設定組名稱。
@@ -352,7 +385,7 @@ CLI 保留原本 ncclient 相容流程，因此舊 CLI 私鑰／password 行為�
 
 ### 進階頁：匯出各種 GUI 設定
 
-「進階 / YANG schema」頁提供兩個按鈕，皆包含目前尚未儲存的欄位、既存連線
+「進階」頁提供兩個匯出按鈕，皆包含目前尚未儲存的欄位、既存連線
 設定組及 SSH 帳號組；不會讀取或匯出 NETCONF server 的 running XML。
 
 - **匯出設定 JSON（不含密碼）**：UTF-8 可讀檔，所有 password、key_passphrase 欄位均移除。
@@ -389,7 +422,7 @@ list instance 顯示 key，例如 `interface [name=eth0]`。
   此選項只適用 running；不會把 state 寫入 running/candidate/startup。
 - **更新 YANG**：重新抓取 schema。一般重連可重用有 revision/content-id 的 cache；
   cache 位於使用者的 `.netconf-console2/gui-schemas`，不在交付包或 repository。
-- 若設備無法提供某些 schema，可在「進階 / YANG schema」選本機 `.yang` 資料夾作為備援。
+- 若設備無法提供某些 schema，可在「進階」選本機 `.yang` 資料夾作為備援。
   必須包含正確 revision，以及 import/include 的相依 modules/submodules。
   YANG 缺失或編譯錯誤時仍可瀏覽 XML，但停用送出，避免誤判 config 或 list key。
 - 「連線 / Schema 詳情」可查看 session、capabilities 及完整編譯提醒。
@@ -616,7 +649,7 @@ NETCONF 的 `access-denied` 表示該 NETCONF 帳號未通過授權；不等於�
 這個功能供**已有該機器系統管理授權**的人操作，不會新增 NACM 規則、修改權限，
 也不會在 NETCONF 失敗時暗中改用 root。仍需有效的系統 SSH 帳密／私鑰和 sysrepo 存取權限。
 
-1. 點「顯示連線設定」，打開「系統 SSH／sysrepo」分頁。
+1. 點「顯示連線設定」，打開「系統SSH」分頁。
 2. Host 預設 `127.0.0.1`、port `22`、帳號 `root`；填入 Docker 模擬 O-RU 的實際系統 SSH 帳密。
 3. 選擇 password／private-key／agent／auto；登入密碼與私鑰密碼分開。
 4. host key 驗證預設不勾選；正式環境建議核對主機指紋並啟用，指定 Known hosts
@@ -677,14 +710,14 @@ sysrepo 專用 `sr:operation="none"`（`sr` namespace 為 `http://www.sysrepo.or
 
 ## 3.9.1 遠端 Sysrepo 備份／還原
 
-「系統 SSH／sysrepo」分頁旁新增「備份／還原」分頁。這裡執行的是已登入 RU
+「系統SSH」分頁旁新增「備份／還原」分頁。這裡執行的是已登入 RU
 的系統 SSH 命令，不是 NETCONF `copy-config`，也不是 GUI 本機設定的 DPAPI 備份。
 因此必須先連線到真正存放 Sysrepo 的主機，且系統 SSH 帳號要有 `sysrepocfg`、
 `sysrepoctl`、`sha256sum` 與 `systemctl` 的必要權限。
 
 ### 建立備份
 
-1. 在「系統 SSH／sysrepo」填入 RU 的 system SSH host、port、帳號與認證，按「連線系統 SSH」。
+1. 在「系統SSH」填入 RU 的 system SSH host、port、帳號與認證，按「連線系統 SSH」。
 2. 切到「備份／還原」；確認遠端 BASE（預設 `/data/backup-yang-baseline`）、
    `sysrepoctl` 路徑與初始 YANG module（預設 `o-ran-sync`）。BASE 只接受安全的絕對路徑，
    不接受 `sudo`、管線或其他 shell 片段。
@@ -751,11 +784,12 @@ sysrepocfg --copy-from="$LATEST/running.xml" --datastore=running --format=xml
 從原始碼啟動：
 
 ```powershell
-py -3 -m pip install -e .
-py -3 -m netconf_console.gui.app
+py -3 -m pip install -e ".[gui]"
+py -3 -m netconf_console.gui.qt_app
 ```
 
-需使用包含 Tcl/Tk 的 Windows Python，pyang 相依套件會由 pip 安裝。
+PySide6 由 `[gui]` 額外相依套件安裝；若要使用舊版 Tk/ttk 備援，仍可執行
+`py -3 -m netconf_console.gui.app`。pyang 及其他 NETCONF 相依套件會由 pip 安裝。
 GUI EXE 的離線 runtime/widget 測試：
 
 ```powershell

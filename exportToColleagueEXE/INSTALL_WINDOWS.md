@@ -29,8 +29,9 @@ rollback-on-error 預設關閉，需 server 宣告支援；所有合併／範本
 3.6.1 將「NETCONF方式修改」（綠色）及「使用系統sysrepocfg修改」（紅色）
 並排放到 XML 區工具列，停用時呈灰色；連線設定分頁改為粗體及藍底白字選中狀態。
 
-雙擊 `netconf-console2-gui.exe` 開啟 Windows 視窗；原本
+雙擊 `netconf-console2-gui.exe` 開啟 PySide6/Qt Windows 視窗；原本
 `netconf-console2.exe` 是 CLI，仍可獨立使用。
+GUI 發行版只保留這個檔名，不再附內容相同的 `netconf-console2-gui-qt.exe`。
 GUI 預設讀取 running，支援 Direct SSH/TLS 與 SSH/TLS Call Home、YANG 樹狀選單、
 default/state/變更標色與實際修改 RPC 預覽。
 詳見 [GUI_GUIDE_ZH_TW.md](GUI_GUIDE_ZH_TW.md)。
@@ -54,12 +55,12 @@ SSH 認證方式與獨立私鑰密碼、搜尋與 YANG 欄位說明、XML 匯入
 `.nccbackup` 只能由原 Windows 帳號／電腦解密；還原只先載入草稿，不自動送出。
 跳板不需要額外安裝 sshpass；TLS 與 Call Home 模式請勿勾選跳板。
 
-3.6.0 新增獨立「系統 SSH／sysrepo」分頁，可用另組 OS 帳號登入 22 port，
+3.6.0 新增獨立「系統SSH」分頁，可用另組 OS 帳號登入 22 port，
 經明確確認將最小 running 變更 XML 送給 sysrepocfg stdin。不會在 NETCONF 拒絕權限時自動改用 root。
 遠端須有 sysrepocfg；Windows 不需安裝它。WSL Docker 情境請確認 SSH port 對應的是 O-RU 容器。
 修改前比對、修改後讀回；不保存 startup，不重送。stdin 模式的 --lock 存在版本差異，詳見操作說明。
 
-同一個「系統 SSH／sysrepo」區域另有「備份／還原」分頁：可將 running（及選用的
+同一個「系統SSH」設定區域旁另有「備份／還原」分頁：可將 running（及選用的
 candidate/startup）匯出到遠端 UTC 時間目錄，保存 `modules.txt` 與 `SHA256SUMS`；
 還原只套用最新且驗證通過的 `running.xml`，並在明確確認後停止／恢復相關服務。
 完整操作與安全限制請看 [GUI_GUIDE_ZH_TW.md](GUI_GUIDE_ZH_TW.md)。

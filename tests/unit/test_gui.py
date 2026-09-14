@@ -179,6 +179,14 @@ class EditModelTests(unittest.TestCase):
         self.assertEqual(removed.get("{%s}operation" % NC), "remove")
         self.assertEqual(plan.removals, 1)
 
+    def test_delete_top_level_root_is_one_atomic_remove(self):
+        selection = Selection(self.interfaces, (), True, True)
+        plan = build_plan(selection, selection.text(), self.schema)
+        config_root = plan.rpc.find("{%s}edit-config/{%s}config" % (NC, NC))[0]
+        self.assertEqual(config_root.tag, self.interfaces.tag)
+        self.assertEqual(config_root.get("{%s}operation" % NC), "remove")
+        self.assertEqual(plan.removals, 1)
+
     def test_duplicate_leaf_missing_keys_and_nc_operation_rejected(self):
         for old, new in (("</interface>", "<enabled>false</enabled></interface>"),
                          ("<name>eth0</name>", ""),

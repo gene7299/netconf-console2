@@ -19,14 +19,14 @@ EXE、測試、Git metadata、PyInstaller 建置檔或 Python cache。
 .\run-netconf-console2-gui.ps1
 ```
 
-安裝腳本會建立本資料夾專用的 `.venv`，並從這份原始碼執行 `pip install`。
+安裝腳本會建立本資料夾專用的 `.venv`，並安裝 NETCONF runtime 與 PySide6，再從這份原始碼執行 `pip install`。
 不會修改系統 Python，也不需要以系統管理員身分執行。
 
 等效的手動安裝命令：
 
 ```powershell
 py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade .
+.\.venv\Scripts\python.exe -m pip install --upgrade ".[gui]"
 .\.venv\Scripts\netconf-console2.exe --help
 ```
 
@@ -56,14 +56,19 @@ exportToColleague\
 ```
 
 Runtime dependencies 包含 `ncclient`、`paramiko`、`lxml`、`prompt-toolkit`、`pyang`
-及其遞迴相依套件。若目標電腦完全離線，必須另外準備與目標 Python 版本和
+及 PySide6 與其遞迴相依套件。若目標電腦完全離線，必須另外準備與目標 Python 版本和
 Windows 架構相符的 wheelhouse；只有 application wheel 並不足以離線安裝。
 
 ## 四種連線方式
 
-GUI 同樣支援以下四種模式。使用包含 Tcl/Tk 的 Windows Python，執行
-`run-netconf-console2-gui.ps1` 後填寫上排連線欄位；預設來源是 running。
+GUI 同樣支援以下四種模式。執行 `run-netconf-console2-gui.ps1` 啟動 PySide6 GUI
+後先在第一個「NETCONF連線」分頁填寫連線欄位；預設來源是 running。
 完整操作與安全限制請看 [GUI_GUIDE_ZH_TW.md](GUI_GUIDE_ZH_TW.md)。
+
+此版本採 Qt splitter／model-view／QThread 版面，支援四種連線模式、profile、
+schema、DATA TREE、XML 編輯與送出，以及系統 SSH/sysrepocfg、備份／還原、
+事件通知、草稿、診斷與結果核對功能。發行版只保留 `netconf-console2-gui` 入口；
+原 Tk/ttk 介面若仍需使用，請直接執行虛擬環境中的 `netconf-console2-gui-tk`。
 
 Direct SSH：
 

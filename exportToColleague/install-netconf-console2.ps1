@@ -34,10 +34,14 @@ if ($UseWheel) {
     $installTarget = $wheel.FullName
 }
 
+& $python -m pip install --upgrade -r (Join-Path $packageRoot "requirements-runtime.txt")
+if ($LASTEXITCODE -ne 0) {
+    throw "pip could not install the NETCONF and PySide6 runtime dependencies."
+}
 & $python -m pip install --upgrade $installTarget
 if ($LASTEXITCODE -ne 0) {
     throw "pip could not install netconf-console2 or its dependencies."
 }
 
 Write-Host "Installed netconf-console2 from $(if ($UseWheel) { 'wheel' } else { 'source' }) in $packageRoot\.venv"
-Write-Host "Run .\run-netconf-console2.ps1 --interactive ..."
+Write-Host "Run .\run-netconf-console2-gui.ps1 for the PySide6 GUI, or .\run-netconf-console2.ps1 --interactive for the CLI."

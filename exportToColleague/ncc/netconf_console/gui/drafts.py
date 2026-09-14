@@ -37,7 +37,7 @@ def draft_key(scope, source, selection, schema):
 def selection_copy(selection, schema):
     ancestors = tuple(_key_shell(node, schema.lookup(selection.path[:i + 1]))
                       for i, node in enumerate(selection.ancestors))
-    return Selection(deepcopy(selection.node), ancestors, selection.exists)
+    return Selection(deepcopy(selection.node), ancestors, selection.exists, selection.delete)
 
 
 @dataclass
@@ -106,8 +106,9 @@ class DraftShelf:
         key = draft_key(scope, source, selection, schema)
         previous = self.entries.get(key)
         if previous:
-            if previous.text != text:
+            if previous.text != text or previous.selection.delete != selection.delete:
                 previous.text = text
+                previous.selection = selection_copy(selection, schema)
                 previous.updated = datetime.now(timezone.utc).isoformat(timespec="seconds")
             return previous
         if len(self.entries) >= MAX_ENTRIES:
@@ -161,9 +162,12 @@ class DraftShelf:
                 keys = ("key", "scope", "source", "text", "schema_hash", "label", "updated", "node")
                 if not all(isinstance(item.get(k), str) for k in keys) or item["source"] not in {"running", "candidate"}:
                     raise ValueError()
-                if type(item.get("exists")) is not bool or not isinstance(item.get("ancestors"), list) or len(item["ancestors"]) > 128:
+                if (type(item.get("exists")) is not bool or
+                        ("delete" in item and type(item.get("delete")) is not bool) or
+                        not isinstance(item.get("ancestors"), list) or len(item["ancestors"]) > 128):
                     raise ValueError()
-                selection = Selection(parse_editor(item["node"]), tuple(parse_editor(x) for x in item["ancestors"]), item["exists"])
+                selection = Selection(parse_editor(item["node"]), tuple(parse_editor(x) for x in item["ancestors"]),
+                                      item["exists"], item.get("delete", False))
                 entry = Draft(*(item[k] for k in ("key", "scope", "source")), selection,
                               *(item[k] for k in ("text", "schema_hash", "label", "updated")))
                 if entry.key in loaded or not selection.exists and selection.ancestors:
@@ -182,7 +186,7 @@ class DraftShelf:
         for entry in self.entries.values():
             item = {key: getattr(entry, key) for key in ("key", "scope", "source", "text", "schema_hash", "label", "updated")}
             item.update(node=entry.selection.text(), ancestors=[etree.tostring(n, encoding="unicode") for n in entry.selection.ancestors],
-                        exists=entry.selection.exists)
+                        exists=entry.selection.exists, delete=entry.selection.delete)
             items.append(item)
         raw = json.dumps({"version": 1, "drafts": items}, ensure_ascii=False).encode("utf-8")
         if len(raw) > MAX_BYTES:
