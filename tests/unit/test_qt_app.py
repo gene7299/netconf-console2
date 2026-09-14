@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 try:
     from lxml import etree
     from PySide6.QtCore import Qt, QThread
-    from PySide6.QtWidgets import QApplication, QLineEdit, QMessageBox, QTreeWidgetItem
+    from PySide6.QtWidgets import QApplication, QDialogButtonBox, QLineEdit, QMessageBox, QTreeWidgetItem
     from netconf_console.gui.creation import Candidate
     from netconf_console.gui.demo import DemoClient
     from netconf_console.gui.qt_app import CreationDialog, QtMainWindow, build_application
@@ -27,7 +27,7 @@ class QtWorkspaceTests(unittest.TestCase):
         cls.app = build_application()
 
     def setUp(self):
-        self.window = QtMainWindow(client=DemoClient(), persist=False)
+        self.window = QtMainWindow(client=DemoClient(), persist=False, language="zh-TW")
         self.window.load_demo()
         self.app.processEvents()
 
@@ -76,6 +76,21 @@ class QtWorkspaceTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(self.window.tree.topLevelItemCount(), original_roots)
         self.assertEqual(self.window.tree_search_count.text(), "")
+
+    def test_gui_language_switch_translates_controls_and_menu(self):
+        self.window.set_gui_language("en")
+        self.app.processEvents()
+        self.assertEqual(self.window.language, "en")
+        self.assertEqual(self.window.tabs.tabText(0), "NETCONF Connection")
+        self.assertEqual(self.window.connect_button.text(), "Connected")
+        self.assertEqual(self.window.tree_search.placeholderText(), "Node name, value, or path")
+        self.assertEqual(self.window.menuBar().actions()[0].text(), "Configuration")
+
+        self.window.set_gui_language("zh-CN")
+        self.app.processEvents()
+        self.assertEqual(self.window.tabs.tabText(0), "NETCONF连接")
+        self.assertEqual(self.window.connect_button.text(), "已连接")
+        self.assertEqual(self.window.tree_search.placeholderText(), "节点名称、值或路径")
 
     def test_edit_updates_exact_preview(self):
         self.window.editor.setPlainText(
@@ -149,12 +164,19 @@ class QtWorkspaceTests(unittest.TestCase):
             self.assertTrue(dialog.choice_button.isEnabled())
             self.assertTrue(any("transport" in dialog.choice_box.itemText(i)
                                 for i in range(dialog.choice_box.count())))
+            self.window.set_gui_language("en")
+            self.app.processEvents()
+            self.assertEqual(
+                dialog.buttons.button(QDialogButtonBox.StandardButton.Ok).text(),
+                "Add to XML draft",
+            )
             dialog._add_choice()
             xml = dialog.editor.toPlainText()
             self.assertIn("<choice-module:ssh", xml)
             self.assertNotIn("<transport", xml)
         finally:
             dialog.close()
+            self.window.set_gui_language("zh-TW")
 
     def test_creation_picker_hides_unavailable_nodes_until_requested(self):
         schema = SchemaIndex.compile({

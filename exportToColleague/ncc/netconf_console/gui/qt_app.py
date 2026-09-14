@@ -42,19 +42,258 @@ from .profile_exchange import merge_profiles, read_import
 from .workspace import (import_selection, instance_path, search_snapshot, value_changes,
                         xml_diff)
 from .windows import icon_path, set_app_id
+from .i18n import (LANGUAGE_LABELS, LANGUAGES, language_label,
+                   normalize_language, retranslate_widget_tree, resolve_language,
+                   set_language, translate as tr)
 
 from PySide6.QtCore import (QAbstractAnimation, QEvent, QObject, QPoint, QRect, QSize,
                             Qt, QThread, QTimer, Signal, Slot)
 from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QIcon, QKeySequence, QPalette,
                            QPainter, QTextCharFormat, QTextCursor)
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-    QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
-    QInputDialog, QMenu,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStatusBar,
-    QTabWidget, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QApplication, QCheckBox as _QtCheckBox, QComboBox, QDialog as _QtDialog,
+    QDialogButtonBox as _QtDialogButtonBox, QFileDialog as _QtFileDialog, QFormLayout, QFrame,
+    QGridLayout, QGroupBox as _QtGroupBox, QHBoxLayout, QLabel as _QtLabel,
+    QLineEdit as _QtLineEdit, QListWidget, QListWidgetItem,
+    QMainWindow as _QtMainWindow, QMessageBox as _QtMessageBox,
+    QPlainTextEdit as _QtPlainTextEdit, QInputDialog as _QtInputDialog,
+    QMenu as _QtMenu, QProgressBar, QPushButton as _QtPushButton, QScrollArea,
+    QSizePolicy, QSplitter, QStatusBar, QTabWidget as _QtTabWidget,
+    QTextEdit as _QtTextEdit, QTreeWidget as _QtTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
 )
+
+
+class _TranslatedTextMixin:
+    """Translate widget text while retaining its original source string."""
+
+    def __init__(self, *args, **kwargs):
+        source = args[0] if args and isinstance(args[0], str) else None
+        if source is not None:
+            args = args[1:]
+        super().__init__(*args, **kwargs)
+        self._ncc_source_text = source
+        if source is not None:
+            self.setText(source)
+
+    def setText(self, text):  # noqa: N802 - Qt API name
+        self._ncc_source_text = "" if text is None else str(text)
+        super().setText(tr(self._ncc_source_text))
+
+    def _ncc_retranslate(self):
+        if hasattr(self, "_ncc_source_text"):
+            super().setText(tr(self._ncc_source_text))
+
+
+class QLabel(_TranslatedTextMixin, _QtLabel):
+    pass
+
+
+class QPushButton(_TranslatedTextMixin, _QtPushButton):
+    pass
+
+
+class QCheckBox(_TranslatedTextMixin, _QtCheckBox):
+    pass
+
+
+class QGroupBox(_TranslatedTextMixin, _QtGroupBox):
+    pass
+
+
+class _TranslatedWindowMixin:
+    def setWindowTitle(self, title):  # noqa: N802 - Qt API name
+        self._ncc_source_title = "" if title is None else str(title)
+        super().setWindowTitle(tr(self._ncc_source_title))
+
+    def _ncc_retranslate(self):
+        if hasattr(self, "_ncc_source_title"):
+            super().setWindowTitle(tr(self._ncc_source_title))
+
+
+class QDialog(_TranslatedWindowMixin, _QtDialog):
+    pass
+
+
+class QMainWindow(_TranslatedWindowMixin, _QtMainWindow):
+    pass
+
+
+class QLineEdit(_QtLineEdit):
+    def setPlaceholderText(self, text):  # noqa: N802 - Qt API name
+        self._ncc_source_placeholder = "" if text is None else str(text)
+        super().setPlaceholderText(tr(self._ncc_source_placeholder))
+
+    def _ncc_retranslate(self):
+        if hasattr(self, "_ncc_source_placeholder"):
+            super().setPlaceholderText(tr(self._ncc_source_placeholder))
+
+
+class QPlainTextEdit(_QtPlainTextEdit):
+    def setPlaceholderText(self, text):  # noqa: N802 - Qt API name
+        self._ncc_source_placeholder = "" if text is None else str(text)
+        super().setPlaceholderText(tr(self._ncc_source_placeholder))
+
+    def _ncc_retranslate(self):
+        if hasattr(self, "_ncc_source_placeholder"):
+            super().setPlaceholderText(tr(self._ncc_source_placeholder))
+
+
+class QTextEdit(_QtTextEdit):
+    def setPlaceholderText(self, text):  # noqa: N802 - Qt API name
+        self._ncc_source_placeholder = "" if text is None else str(text)
+        super().setPlaceholderText(tr(self._ncc_source_placeholder))
+
+    def _ncc_retranslate(self):
+        if hasattr(self, "_ncc_source_placeholder"):
+            super().setPlaceholderText(tr(self._ncc_source_placeholder))
+
+
+class QTreeWidget(_QtTreeWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._ncc_header_sources = []
+
+    def setHeaderLabels(self, labels):  # noqa: N802 - Qt API name
+        self._ncc_header_sources = [str(label) for label in labels]
+        super().setHeaderLabels([tr(label) for label in self._ncc_header_sources])
+
+    def _ncc_retranslate(self):
+        if self._ncc_header_sources:
+            super().setHeaderLabels([tr(label) for label in self._ncc_header_sources])
+        def refresh(item):
+            source = item.data(0, ITEM_SOURCE_ROLE)
+            if source is not None:
+                item.setText(0, tr(str(source)))
+            for index in range(item.childCount()):
+                refresh(item.child(index))
+        for index in range(self.topLevelItemCount()):
+            refresh(self.topLevelItem(index))
+
+
+class QTabWidget(_QtTabWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._ncc_tab_sources = {}
+
+    def addTab(self, widget, label):  # noqa: N802 - Qt API name
+        index = super().addTab(widget, tr(label))
+        self._ncc_tab_sources[index] = str(label)
+        return index
+
+    def setTabText(self, index, text):  # noqa: N802 - Qt API name
+        self._ncc_tab_sources[index] = "" if text is None else str(text)
+        super().setTabText(index, tr(self._ncc_tab_sources[index]))
+
+    def _ncc_retranslate(self):
+        for index, source in self._ncc_tab_sources.items():
+            if index < self.count():
+                super().setTabText(index, tr(source))
+
+
+class QMenu(_QtMenu):
+    def addAction(self, *args):  # noqa: N802 - Qt API name
+        if args and isinstance(args[0], str):
+            source = args[0]
+            action = super().addAction(tr(source), *args[1:])
+            action.setProperty("_ncc_source_text", source)
+            return action
+        return super().addAction(*args)
+
+    def addMenu(self, *args):  # noqa: N802 - Qt API name
+        if args and isinstance(args[0], str):
+            return _MenuProxy(super().addMenu(tr(args[0])), args[0])
+        return super().addMenu(*args)
+
+
+class _MenuProxy:
+    """Keep source labels for menus returned by QMenuBar's C++ overload."""
+
+    def __init__(self, menu, title=None):
+        self.menu = menu
+        self.title = title
+        if title is not None:
+            self.menu.setProperty("_ncc_source_title", title)
+
+    def addAction(self, *args):
+        if args and isinstance(args[0], str):
+            source = args[0]
+            action = self.menu.addAction(tr(source), *args[1:])
+            action.setProperty("_ncc_source_text", source)
+            return action
+        return self.menu.addAction(*args)
+
+    def addMenu(self, title):
+        return _MenuProxy(self.menu.addMenu(tr(title)), title)
+
+    def addSeparator(self):
+        return self.menu.addSeparator()
+
+
+class QMessageBox:
+    StandardButton = _QtMessageBox.StandardButton
+
+    @staticmethod
+    def question(parent, title, text, *args, **kwargs):
+        return _QtMessageBox.question(parent, tr(title), tr(text), *args, **kwargs)
+
+    @staticmethod
+    def information(parent, title, text, *args, **kwargs):
+        return _QtMessageBox.information(parent, tr(title), tr(text), *args, **kwargs)
+
+    @staticmethod
+    def warning(parent, title, text, *args, **kwargs):
+        return _QtMessageBox.warning(parent, tr(title), tr(text), *args, **kwargs)
+
+    @staticmethod
+    def critical(parent, title, text, *args, **kwargs):
+        return _QtMessageBox.critical(parent, tr(title), tr(text), *args, **kwargs)
+
+
+class QFileDialog:
+    @staticmethod
+    def getSaveFileName(parent, title, directory="", file_filter="", *args, **kwargs):
+        return _QtFileDialog.getSaveFileName(parent, tr(title), directory, tr(file_filter), *args, **kwargs)
+
+    @staticmethod
+    def getOpenFileName(parent, title, directory="", file_filter="", *args, **kwargs):
+        return _QtFileDialog.getOpenFileName(parent, tr(title), directory, tr(file_filter), *args, **kwargs)
+
+    @staticmethod
+    def getExistingDirectory(parent, title, directory="", *args, **kwargs):
+        return _QtFileDialog.getExistingDirectory(parent, tr(title), directory, *args, **kwargs)
+
+
+class QInputDialog:
+    @staticmethod
+    def getText(parent, title, label, *args, **kwargs):
+        return _QtInputDialog.getText(parent, tr(title), tr(label), *args, **kwargs)
+
+    @staticmethod
+    def getInt(parent, title, label, *args, **kwargs):
+        return _QtInputDialog.getInt(parent, tr(title), tr(label), *args, **kwargs)
+
+
+class QDialogButtonBox(_QtDialogButtonBox):
+    _STANDARD_LABELS = {
+        _QtDialogButtonBox.StandardButton.Ok: "確定",
+        _QtDialogButtonBox.StandardButton.Cancel: "取消",
+        _QtDialogButtonBox.StandardButton.Close: "關閉",
+        _QtDialogButtonBox.StandardButton.Save: "儲存",
+        _QtDialogButtonBox.StandardButton.Yes: "是",
+        _QtDialogButtonBox.StandardButton.No: "否",
+    }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._ncc_retranslate()
+
+    def _ncc_retranslate(self):
+        for standard, source in self._STANDARD_LABELS.items():
+            button = self.button(standard)
+            if button is not None:
+                custom = button.property("_ncc_source_text")
+                button.setText(tr(str(custom) if custom is not None else source))
 
 
 COLORS = {
@@ -66,6 +305,7 @@ COLORS = {
 }
 MODES = ("Direct SSH", "Direct TLS", "SSH Call Home", "TLS Call Home")
 USER_ROLE = Qt.ItemDataRole.UserRole
+ITEM_SOURCE_ROLE = Qt.ItemDataRole.UserRole + 1
 INITIAL_WINDOW_SIZE = QSize(1280, 800)
 
 
@@ -351,7 +591,9 @@ class CreationDialog(QDialog):
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText("加入 XML 草稿")
+        ok_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
+        ok_button.setProperty("_ncc_source_text", "加入 XML 草稿")
+        ok_button.setText(tr("加入 XML 草稿"))
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         root_layout.addWidget(self.buttons)
@@ -416,7 +658,7 @@ class CreationDialog(QDialog):
             haystack = " ".join((label, info.description or "", info.type_name or "")).casefold()
             if query and query not in haystack:
                 continue
-            item = QListWidgetItem(label)
+            item = QListWidgetItem(tr(label))
             item.setData(USER_ROLE, candidate)
             if not candidate.allowed:
                 item.setForeground(QBrush(QColor("#8793a4")))
@@ -781,7 +1023,6 @@ class ProfileDialog(QDialog):
         name = self._selected_name()
         if not name:
             return
-        from PySide6.QtWidgets import QInputDialog
         new_name, ok = QInputDialog.getText(self, "重新命名", "新名稱：", text=name)
         if not ok:
             return
@@ -807,7 +1048,14 @@ class ProfileDialog(QDialog):
 class QtMainWindow(QMainWindow):
     """Responsive PySide6 XML workspace."""
 
-    def __init__(self, client=None, *, persist=True):
+    def __init__(self, client=None, *, persist=True, language=None):
+        if language is None and persist:
+            try:
+                language = PreferencesStore().load().get("last", {}).get("language")
+            except Exception:
+                language = None
+        self.language = resolve_language(language)
+        set_language(self.language)
         super().__init__()
         self.client = client or GuiClient()
         self.persist = persist
@@ -828,6 +1076,7 @@ class QtMainWindow(QMainWindow):
         self._prefs_loading = False
         self.preferences_error = ""
         self.preferences = empty_book()
+        self.language_actions = {}
         self.connection_save_as = False
         self.connection_hidden = False
         self.lifecycle_dialog = None
@@ -990,7 +1239,17 @@ class QtMainWindow(QMainWindow):
         self.progress.setTextVisible(False)
         self.status_bar.addPermanentWidget(self.progress)
 
-        settings_menu = self.menuBar().addMenu("設定操作")
+        settings_menu = _MenuProxy(self.menuBar().addMenu(tr("設定操作")), "設定操作")
+        language_menu = settings_menu.addMenu("語言 / Language")
+        for code in LANGUAGES:
+            action = language_menu.addAction(LANGUAGE_LABELS[code])
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, selected=code: self.set_gui_language(selected)
+            )
+            self.language_actions[code] = action
+        self._sync_language_actions()
+        settings_menu.addSeparator()
         for operation, (label, *_rest) in lifecycle.OPERATIONS.items():
             action = settings_menu.addAction(label + "…")
             action.triggered.connect(lambda _checked=False, op=operation: self.datastore_action(op))
@@ -1002,7 +1261,7 @@ class QtMainWindow(QMainWindow):
         draft_action.triggered.connect(self.validate_draft)
         settings_menu.addAction("查看功能停用原因…", self.show_availability)
 
-        tools_menu = self.menuBar().addMenu("工具")
+        tools_menu = _MenuProxy(self.menuBar().addMenu(tr("工具")), "工具")
         export_action = tools_menu.addAction("匯出目前 XML…")
         export_action.triggered.connect(self.export_editor)
         export_tree = tools_menu.addAction("匯出 DATA TREE…")
@@ -1036,6 +1295,25 @@ class QtMainWindow(QMainWindow):
         details_action.triggered.connect(self.show_details)
         close_action = tools_menu.addAction("關閉")
         close_action.triggered.connect(self.close)
+
+    def _sync_language_actions(self):
+        for code, action in self.language_actions.items():
+            action.setChecked(code == self.language)
+
+    def set_gui_language(self, language):
+        """Apply a GUI language immediately and persist the explicit choice."""
+        selected = resolve_language(normalize_language(language))
+        if selected == self.language:
+            self._sync_language_actions()
+            return
+        self.language = selected
+        set_language(selected)
+        retranslate_widget_tree(self)
+        self._sync_language_actions()
+        self.save_preferences()
+        self.status_label.setText(
+            tr("語言已切換為 %s；重新開啟後也會保留此選擇。") % language_label(selected)
+        )
 
     def _line(self, layout, name, row, column, span=1, *, password=False):
         edit = QLineEdit()
@@ -1823,6 +2101,7 @@ class QtMainWindow(QMainWindow):
                 "values": values,
                 "connection": connection_name,
                 "account": self.account_box.currentText().strip(),
+                "language": self.language,
             }
             PreferencesStore().save(self.preferences)
         except Exception as exc:
@@ -2316,7 +2595,8 @@ class QtMainWindow(QMainWindow):
         if branch:
             label = "choice %s → %s : %s" % (branch, info.module, local(info.path[-1]))
         label += "（未讀到／可建立）" if not candidate.reason else "（%s）" % candidate.reason
-        item = QTreeWidgetItem(parent, [label])
+        item = QTreeWidgetItem(parent, [tr(label)])
+        item.setData(0, ITEM_SOURCE_ROLE, label)
         item.setData(0, USER_ROLE, candidate)
         item.setForeground(0, QBrush(QColor("#7b8798")))
         item.setFont(0, QFont("Segoe UI", 10, QFont.Weight.Normal))
@@ -2499,7 +2779,9 @@ class QtMainWindow(QMainWindow):
             add(self.tree, node, ())
 
         if not found:
-            empty = QTreeWidgetItem(self.tree, ["找不到符合「%s」的節點" % self.tree_search.text().strip()])
+            empty_label = "找不到符合「%s」的節點" % self.tree_search.text().strip()
+            empty = QTreeWidgetItem(self.tree, [tr(empty_label)])
+            empty.setData(0, ITEM_SOURCE_ROLE, empty_label)
             empty.setData(0, USER_ROLE, "tree-search-empty")
             empty.setFlags(empty.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             empty.setForeground(0, QBrush(QColor("#7b8798")))
@@ -3370,7 +3652,9 @@ class QtMainWindow(QMainWindow):
         preview = self._output_edit()
         layout.addWidget(preview, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("更新 XML 草稿")
+        ok_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        ok_button.setProperty("_ncc_source_text", "更新 XML 草稿")
+        ok_button.setText(tr("更新 XML 草稿"))
         layout.addWidget(buttons)
         fields = []
         reference = None
@@ -4082,7 +4366,8 @@ class QtMainWindow(QMainWindow):
         layout = QVBoxLayout(dialog)
         bar = QHBoxLayout()
         severity = QComboBox()
-        severity.addItems(["全部", "critical", "major", "minor", "warning", "indeterminate", "cleared", "unknown"])
+        for value in ("全部", "critical", "major", "minor", "warning", "indeterminate", "cleared", "unknown"):
+            severity.addItem(tr(value), value)
         search = QLineEdit()
         search.setPlaceholderText("搜尋時間、來源、事件或 XML")
         refresh = QPushButton("篩選")
@@ -4116,7 +4401,7 @@ class QtMainWindow(QMainWindow):
         self.alarm_tree.clear()
         self.alarm_rows.clear()
         query = self.alarm_search_box.text().casefold()
-        selected = self.alarm_filter_box.currentText().lower()
+        selected = str(self.alarm_filter_box.currentData() or self.alarm_filter_box.currentText()).lower()
         for index, record in enumerate(self.event_records):
             if selected != "全部" and record.severity != selected:
                 continue
@@ -4203,7 +4488,9 @@ class QtMainWindow(QMainWindow):
         options.addStretch(1)
         layout.addLayout(options)
         controls = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        controls.button(QDialogButtonBox.StandardButton.Ok).setText("確認匯入選取項目")
+        ok_button = controls.button(QDialogButtonBox.StandardButton.Ok)
+        ok_button.setProperty("_ncc_source_text", "確認匯入選取項目")
+        ok_button.setText(tr("確認匯入選取項目"))
         layout.addWidget(controls)
 
         def current_item():

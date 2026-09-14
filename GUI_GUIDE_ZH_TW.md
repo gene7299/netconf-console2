@@ -22,6 +22,16 @@ netconf-console2-gui --demo
 Qt 版使用同一套 NETCONF／YANG／sysrepo backend，不會另行推測 schema 語意。
 Windows 發行版只提供 `netconf-console2-gui.exe`，不再建立內容相同的 `-qt` 別名檔。
 
+## GUI 語系
+
+GUI 支援繁體中文、簡體中文與 English。第一次啟動會依 Windows 顯示語言自動選擇：
+繁中地區使用繁體中文、簡中地區使用簡體中文，其餘語系使用 English。若之前已在
+「設定操作 → 語言 / Language」選過語系，會優先使用該選擇，並在下次啟動保留；
+切換會立即套用，不需重啟。若無法判斷系統語系，預設為 English。
+
+語系只翻譯 GUI 標籤、按鈕、提示與選單；NETCONF/XML、YANG module／leaf 名稱、
+namespace、裝置回傳值與 profile 內的主機／路徑等資料維持原文，避免改變協定內容。
+
 ## 3.9.1：新增節點的必填 choice 分支
 
 YANG 的 `choice` 與 `case` 是 schema-only 結構，不會直接出現在 XML；例如
