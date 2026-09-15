@@ -1,7 +1,9 @@
 # netconf-console2
 
-`netconf-console2` is a Windows-native NETCONF CLI built on `ncclient`, with
-O-RAN O-RU management-plane testing as the primary use case.  It supports
+`netconf-console2` is a NETCONF CLI built on `ncclient`, with O-RAN O-RU
+management-plane testing as the primary use case. The repository provides
+native Windows executables and standalone Ubuntu x86_64 CLI/Qt GUI
+bundles. It supports
 direct SSH/TLS sessions, SSH and TLS Call Home, RFC 6241 core operations,
 RFC 5277 notifications, capability/session inspection, raw RPCs, profiles and
 redacted wire tracing.
@@ -58,6 +60,54 @@ The build script runs the unit suite, creates the one-file executable, runs its
 frozen transport/dependency self-test, then performs real loopback NETCONF
 hello handshakes over Direct SSH, Direct TLS/mTLS, SSH Call Home and TLS Call
 Home/mTLS. It also regenerates `exportToColleagueEXE/SHA256SUMS.txt`.
+
+## Install on Ubuntu 22.04–26.04
+
+`exportToColleagueUbuntu/` contains standalone x86_64 executables built on
+Ubuntu 22.04:
+
+- `netconf-console2` is the command-line client.
+- `netconf-console2-gui` is the PySide6/Qt graphical client.
+
+The executables include Python and their application dependencies; no Python or
+pip installation is required on the target machine. From the repository root:
+
+```bash
+cd exportToColleagueUbuntu
+chmod +x ./netconf-console2 ./netconf-console2-gui
+sha256sum -c ./SHA256SUMS.txt
+./netconf-console2 --help
+./netconf-console2-gui
+```
+
+Use `--demo` to open the GUI without connecting to a device:
+
+```bash
+./netconf-console2-gui --demo
+```
+
+For example, the Ubuntu CLI can connect over NETCONF/SSH with:
+
+```bash
+./netconf-console2 \
+  --host 192.168.9.9 --port 830 --transport ssh \
+  --username oranuser --password --interactive
+```
+
+The Ubuntu GUI supports the same Direct SSH/TLS and SSH/TLS Call Home modes as
+the Windows Qt GUI. TLS certificates, private keys, trusted CA files and SSH
+`known_hosts` files remain external inputs and are never embedded in the
+executable. GUI credentials, drafts, templates and encrypted backups use a
+per-user key at `~/.netconf-console2/gui-settings.key`; keep that file to
+preserve access to the encrypted local data.
+
+The bundle targets Ubuntu 22.04, 24.04 and 26.04 on x86_64. It was built on
+Ubuntu 22.04, so each target release should be smoke-tested before deployment;
+ARM is not supported by this bundle. Developers can rebuild the GUI with:
+
+```bash
+./packaging/build-ubuntu-gui.sh
+```
 
 ## Direct SSH
 
@@ -193,8 +243,9 @@ show optional candidate hints, and stage new containers, leaves and list entries
 New data uses explicit `create`; existing drafts are preserved and nothing is sent
 automatically. XPath constraints and authorization remain server-validated.
 
-GUI 3.8.0 adds cross-node, device/source-isolated drafts with bounded DPAPI persistence
-and explicit schema/baseline rechecks after reconnect or restart. Parent/child draft
+GUI 3.8.0 adds cross-node, device/source-isolated drafts with bounded
+platform-protected encrypted persistence and explicit schema/baseline rechecks after
+reconnect or restart. Parent/child draft
 overlaps are blocked instead of implicitly merged. Existing scalar forms provide typed
 value editing and context-aware leafref candidates with keyed target navigation.
 Restoring or editing a draft never sends it; each write still requires confirmation.
@@ -228,11 +279,12 @@ shows old/new values. SSH login passwords and private-key passphrases are separa
 Bounded metadata-only operation history persists locally. RFC 5277 notifications use
 the active session; without interleave, other RPCs are disabled until disconnect.
 Version 3.5.0 adds draft `test-only` validation, RPC error-path highlighting,
-Direct SSH jump hosts, token-bound confirmed-commit countdowns, DPAPI configuration
+Direct SSH jump hosts, token-bound confirmed-commit countdowns, encrypted configuration
 snapshots with selective staged restore, stream/replay/filter controls and alarm tables.
 Disabled actions explain their capability/state requirements. Persistent confirmed
 commits survive disconnect until the server timeout; they are never auto-confirmed.
-Configuration backups require the original Windows account/computer to decrypt.
+On Windows, configuration backups require the original Windows account/computer;
+on Ubuntu, the per-user `~/.netconf-console2/gui-settings.key` must be retained.
 Version 3.6.0 adds a separate system SSH/sysrepo tab for authorized OS administrators.
 It can apply the minimal running edit via sysrepocfg stdin after target confirmation,
 preflight comparison and explicit approval. It never automatically falls back to root
@@ -338,7 +390,7 @@ netconf-console2 --profile oru --password --interactive
 ```
 
 CLI TOML profiles never provide a password. Use a runtime prompt or an SSH agent/key.
-The Windows GUI has separate encrypted credential storage described in its guide.
+The GUI has platform-specific encrypted credential storage described in its guide.
 
 ## Verification
 
