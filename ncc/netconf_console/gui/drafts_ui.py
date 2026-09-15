@@ -81,7 +81,8 @@ class DraftFeatures:
                 return True
             if self.drafts.entries or self.drafts.path and self.drafts.path.exists():
                 self.drafts.save()
-            self.draft_status.set("草稿已加密保存（僅原 Windows 帳號／電腦可開啟）" if self.drafts.path else "草稿僅保存在記憶體（示範／測試模式）")
+            from .preferences import encrypted_storage_scope
+            self.draft_status.set("草稿已加密保存（%s可開啟）" % encrypted_storage_scope() if self.drafts.path else "草稿僅保存在記憶體（示範／測試模式）")
             return True
         except Exception as exc:
             self.draft_status.set(self.drafts.load_error or "草稿保存失敗，請勿關閉未保存內容：" + type(exc).__name__)

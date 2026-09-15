@@ -11,7 +11,7 @@ from lxml import etree
 from .creation import Template
 from .drafts import schema_fingerprint
 from .model import EditError, children, local, parse_editor
-from .preferences import _dpapi
+from .preferences import _dpapi, encrypted_storage_scope
 
 MAGIC = b"NCC-TEMPLATE\x01"
 MAX_BYTES = 8 * 1024 * 1024
@@ -115,4 +115,4 @@ def load_template(path, schema):
     except EditError:
         raise
     except Exception:
-        raise EditError("範本無法解密／解析；需要原 Windows 帳號及電腦") from None
+        raise EditError("範本無法解密／解析；需要%s" % encrypted_storage_scope()) from None

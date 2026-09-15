@@ -10,7 +10,7 @@ import tempfile
 from lxml import etree
 
 from .model import EditError, Selection, build_plan, children, identity, parse_editor, semantic
-from .preferences import _dpapi
+from .preferences import _dpapi, encrypted_storage_scope
 from .workspace import import_selection, instance_path
 
 MAGIC = b"NCC-CONFIG-BACKUP\x01"
@@ -63,7 +63,7 @@ def load_backup(path):
         parse_editor(payload["xml"])
         return payload
     except Exception:
-        raise EditError("無法解密或解析備份（需原 Windows 帳號／電腦，且檔案完整）。") from None
+        raise EditError("無法解密或解析備份（需%s，且檔案完整）。" % encrypted_storage_scope()) from None
 
 
 @dataclass

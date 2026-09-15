@@ -41,7 +41,8 @@ def self_test(window):
               and window.save_tree_button.cget("text") == "匯出XML"
               and window.save_tree_button.instate(["disabled"]))
         import tempfile
-        from .preferences import PreferencesStore, empty_book, remember_account, remember_connection
+        from .preferences import (PreferencesStore, empty_book, encrypted_storage_scope,
+                                  remember_account, remember_connection)
         with tempfile.TemporaryDirectory(prefix="netconf-gui-preferences-test-") as directory:
             store = PreferencesStore(Path(directory) / "settings.dpapi")
             book = empty_book()
@@ -50,7 +51,7 @@ def self_test(window):
             remember_account(book, fixture)
             remember_connection(book, fixture)
             store.save(book)
-            check("Windows DPAPI encrypted credential round-trip", PreferencesStore(store.path).load() == book
+            check("%s encrypted credential round-trip" % encrypted_storage_scope(), PreferencesStore(store.path).load() == book
                   and fixture["password"].encode() not in store.path.read_bytes())
         from .profiles import ProfileManager
         window.preferences = empty_book()
@@ -113,7 +114,7 @@ def self_test(window):
             path = Path(directory) / "snapshot.nccbackup"
             backups.save_backup(path, window.client.read(ReadOptions(defaults=True)), "synthetic-config-backup", window.client.schema)
             payload = backups.load_backup(path)
-            check("Frozen DPAPI configuration backup", payload["device"] == "synthetic-config-backup"
+            check("Frozen encrypted configuration backup", payload["device"] == "synthetic-config-backup"
                   and b"synthetic-config-backup" not in path.read_bytes())
             changes = backups.restore_choices(window.selection, payload["xml"], window.client.schema, "running")
             check("Frozen selective restore remains local", not changes)
@@ -184,7 +185,7 @@ def self_test(window):
             path = Path(folder) / "library.ncctemplate"
             templates.save_template(path, template, window.client.schema)
             loaded = templates.load_template(path, window.client.schema)
-            check("Frozen schema-bound DPAPI template library", loaded.path == template.path and bool(loaded.pending)
+            check("Frozen schema-bound encrypted template library", loaded.path == template.path and bool(loaded.pending)
                 and b"Frozen form draft" not in path.read_bytes())
         from copy import deepcopy
         mine, fresh = etree.fromstring(window.editor.get().encode()), deepcopy(window.snapshot.data)

@@ -12,7 +12,7 @@ from lxml import etree
 
 from .client import check_selection_current
 from .model import EditError, Selection, _key_shell, identity, parse_editor
-from .preferences import _dpapi
+from .preferences import _dpapi, encrypted_storage_scope
 from .workspace import instance_path
 
 MAGIC = b"NCC-DRAFTS\x01"
@@ -175,7 +175,7 @@ class DraftShelf:
                 loaded[entry.key] = entry
             self.entries = loaded
         except Exception:
-            self.load_error = "無法解密／解析草稿檔；需要原 Windows 帳號與電腦。原檔保留且停止覆寫。"
+            self.load_error = "無法解密／解析草稿檔；需要%s。原檔保留且停止覆寫。" % encrypted_storage_scope()
 
     def save(self):
         if self.path is None:

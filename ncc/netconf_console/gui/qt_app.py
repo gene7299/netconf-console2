@@ -33,7 +33,8 @@ from .leafrefs import resolve as resolve_leafref
 from .model import (EditError, Selection, build_plan, children, identity, local,
                     node_style, parse_editor, xml_spans)
 from .preferences import (CONNECTION_ACCOUNT_FIELD, PreferencesStore, change_profiles,
-                          empty_book, remember_account, remember_connection)
+                          empty_book, encrypted_storage_scope, remember_account,
+                          remember_connection)
 from . import backups, events, lifecycle, reconcile, safety, system_backup, templates
 from .audit import AuditLog
 from .connection_diagnostics import DiagnosticRun, report_text
@@ -1320,7 +1321,7 @@ class QtMainWindow(QMainWindow):
         edit.setObjectName(name)
         edit.setMinimumWidth(90 if span == 1 else (230 if password else 160))
         # The operator explicitly requested visible credentials in this local
-        # desktop tool.  Persistence remains protected by the existing DPAPI
+        # desktop tool. Persistence remains protected by the platform-specific
         # store and diagnostic/audit output still redacts secrets.
         edit.setEchoMode(QLineEdit.EchoMode.Normal)
         layout.addWidget(edit, row, column, 1, span)
@@ -2158,7 +2159,7 @@ class QtMainWindow(QMainWindow):
             self.account_box.setCurrentText(name)
             self._refresh_profile_boxes()
             self.save_preferences()
-            self.status_label.setText("已儲存 SSH 帳號組（密碼仍由 Windows DPAPI 保護）。")
+            self.status_label.setText("已儲存 SSH 帳號組（密碼由%s保護）。" % encrypted_storage_scope())
         except Exception as exc:
             self.show_error(exc)
 
@@ -3423,7 +3424,7 @@ class QtMainWindow(QMainWindow):
                 return False
             if self.drafts.entries or (self.drafts.path and self.drafts.path.exists()):
                 self.drafts.save()
-            self.draft_status = ("草稿已加密保存（僅原 Windows 帳號／電腦）" if self.drafts.path
+            self.draft_status = ("草稿已加密保存（%s可開啟）" % encrypted_storage_scope() if self.drafts.path
                                  else "草稿僅保存在記憶體（示範／測試模式）")
             return True
         except Exception as exc:
@@ -5275,7 +5276,7 @@ def self_test(window):
         "creation_picker": CreationDialog.__doc__ is not None,
     }
     passed = (required["source_default"] == "running"
-              and required["settings_tabs"][:1] == ["NETCONF連線"]
+              and required["settings_tabs"][:1] in (["NETCONF連線"], ["NETCONF Connection"])
               and len(required["settings_tabs"]) == 8
               and len(required["output_tabs"]) == 6
               and required["ssh_hostkey_default"] is False

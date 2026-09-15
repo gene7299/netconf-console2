@@ -1,4 +1,4 @@
-"""Per-user GUI profiles. Only DPAPI ciphertext is ever written to disk."""
+"""Per-user GUI profiles with platform-protected encrypted persistence."""
 from __future__ import annotations
 
 import ctypes
@@ -11,6 +11,7 @@ from pathlib import Path
 from ..config import config_dir
 
 MAGIC = b"NCCGUI-DPAPI\x01"
+LINUX_KEY_FILENAME = "gui-settings.key"
 SSH_FIELDS = ("username", "password", "ssh_key", "allow_agent", "look_for_keys", "ssh_auth", "key_passphrase")
 CONNECTION_ACCOUNT_FIELD = "account_name"
 VIEW_FIELDS = {"source", "defaults", "state", "wrap_xml", "connection_hidden", "auto_reconnect", "show_candidates", "rollback_on_error"}
@@ -20,9 +21,67 @@ class PreferencesError(ValueError):
     pass
 
 
+def encrypted_storage_scope():
+    """Describe where the GUI's encrypted data can be decrypted."""
+    if os.name == "nt":
+        return "原 Windows 帳號／電腦"
+    return "本機使用者／加密金鑰"
+
+
+def _linux_cipher(*, create):
+    """Return the per-user Fernet cipher used by non-Windows GUI builds."""
+    from cryptography.fernet import Fernet
+
+    key_path = config_dir() / LINUX_KEY_FILENAME
+    if create:
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            key = key_path.read_bytes()
+        except FileNotFoundError:
+            candidate = Fernet.generate_key()
+            try:
+                descriptor = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                key = key_path.read_bytes()
+            else:
+                try:
+                    with os.fdopen(descriptor, "wb") as stream:
+                        stream.write(candidate)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    key = candidate
+                except Exception:
+                    try:
+                        key_path.unlink()
+                    except OSError:
+                        pass
+                    raise
+    else:
+        try:
+            key = key_path.read_bytes()
+        except FileNotFoundError:
+            raise PreferencesError("Linux GUI encryption key is missing; the original file was preserved.") from None
+
+    try:
+        cipher = Fernet(key)
+    except (TypeError, ValueError):
+        raise PreferencesError("Linux GUI encryption key is invalid; the original file was preserved.") from None
+    try:
+        os.chmod(key_path, 0o600)
+    except OSError:
+        pass
+    return cipher
+
+
 def _dpapi(data: bytes, decrypt=False) -> bytes:
     if os.name != "nt":
-        raise PreferencesError("GUI credential storage requires Windows DPAPI; no plaintext fallback is allowed.")
+        try:
+            cipher = _linux_cipher(create=not decrypt)
+            return cipher.decrypt(data) if decrypt else cipher.encrypt(data)
+        except PreferencesError:
+            raise
+        except Exception as exc:
+            raise PreferencesError("Linux GUI encrypted storage failed (%s)." % type(exc).__name__) from None
     from ctypes import wintypes
     class Blob(ctypes.Structure):
         _fields_ = [("size", wintypes.DWORD), ("data", ctypes.POINTER(ctypes.c_ubyte))]

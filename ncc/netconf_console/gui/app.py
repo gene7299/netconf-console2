@@ -546,7 +546,8 @@ class NetconfWindow(WorkspaceFeatures):
                 PreferencesStore(filename).save(book)
             else:
                 Path(filename).write_text(json.dumps(public_book(book), ensure_ascii=False, indent=2), encoding="utf-8")
-            self.status.set("已匯出" + ("加密備份（限原 Windows 使用者／電腦）" if encrypted else "設定（不含密碼；仍含帳號、主機與路徑）") + "：" + filename)
+            from .preferences import encrypted_storage_scope
+            self.status.set("已匯出" + (("加密備份（%s）" % encrypted_storage_scope()) if encrypted else "設定（不含密碼；仍含帳號、主機與路徑）") + "：" + filename)
         except Exception as exc:
             self._error(exc)
 

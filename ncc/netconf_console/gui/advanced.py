@@ -281,7 +281,8 @@ class AdvancedFeatures(AdminFeatures):
         source = self.snapshot.options.source if self.snapshot else self.vars["source"].get()
         directory = config_dir() / "backups"
         filename = "netconf-%s-%s.nccbackup" % (source, datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
-        name = filedialog.asksaveasfilename(parent=self.root, title="建立加密設定版本（不含本機草稿；限原 Windows 帳號／電腦）",
+        from .preferences import encrypted_storage_scope
+        name = filedialog.asksaveasfilename(parent=self.root, title="建立加密設定版本（不含本機草稿；%s）" % encrypted_storage_scope(),
             initialdir=str(directory if directory.exists() else directory.parent), initialfile=filename,
             defaultextension=".nccbackup", filetypes=[("Encrypted config snapshot", "*.nccbackup")])
         if not name:
