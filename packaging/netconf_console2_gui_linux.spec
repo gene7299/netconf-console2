@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for the Ubuntu/Linux PySide6 GUI bundle."""
 
+from ctypes.util import find_library
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
@@ -17,7 +18,10 @@ hiddenimports = sorted(set(sum((collect_submodules(module) for module in (
     "nacl",
     "pyang",
 )), [])))
-hiddenimports += ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets"]
+hiddenimports += [
+    "PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets",
+    "netconf_console.gnutls",
+]
 
 datas = [(str(project_root / "packaging" / "assets" / "netconf-console2.ico"), ".")]
 for distribution in (
@@ -38,10 +42,28 @@ for distribution in (
     except Exception:
         pass
 
+gnutls_name = find_library("gnutls")
+gnutls_candidates = []
+if gnutls_name:
+    for directory in (
+        "/lib/x86_64-linux-gnu", "/usr/lib/x86_64-linux-gnu",
+        "/lib/aarch64-linux-gnu", "/usr/lib/aarch64-linux-gnu",
+        "/lib64", "/usr/lib64", "/lib", "/usr/lib",
+    ):
+        gnutls_candidates.append(Path(directory) / gnutls_name)
+# Keep the SONAME filename (libgnutls.so.30) in the bundle.  GnuTLS is
+# loaded through ctypes at runtime, so the name must be discoverable from
+# PyInstaller's extraction directory on a target without system headers.
+gnutls_path = next((path for path in gnutls_candidates if path.is_file()), None)
+if gnutls_path is None:
+    raise SystemExit(
+        "GnuTLS runtime library not found; it is required for RFC 8071 TLS Call Home"
+    )
+
 a = Analysis(
     [str(entry_point)],
     pathex=[str(project_root / "ncc")],
-    binaries=[],
+    binaries=[(str(gnutls_path), ".")],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
