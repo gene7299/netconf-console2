@@ -139,7 +139,14 @@ def serve_ssh(sock: socket.socket, host_key: paramiko.PKey) -> None:
         try:
             serve_netconf(channel)
         finally:
-            channel.close()
+            # The client may close the NETCONF/SSH transport immediately
+            # after receiving close-session. Paramiko can then raise EOFError
+            # while this fake peer sends its redundant channel-close packet;
+            # that is teardown, not a failed handshake/session observation.
+            try:
+                channel.close()
+            except (EOFError, OSError):
+                pass
     finally:
         transport.close()
 

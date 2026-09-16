@@ -1,12 +1,16 @@
 #!/usr/bin/env python
 
-"""Windows-friendly NETCONF CLI and interactive console."""
+"""Headless NETCONF CLI and optional interactive console."""
 
 from __future__ import print_function
 
 import argparse
 import getpass
+import importlib.metadata
+import importlib.util
+import json
 import logging
+import os
 import re
 import shlex
 import sys
@@ -29,6 +33,43 @@ from .xmloutput import XmlResult, emit_xml, read_xml
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def backend_info():
+    """Return offline, machine-readable build and transport capabilities."""
+
+    from .gnutls import backend_capabilities
+
+    try:
+        version = importlib.metadata.version("netconf-console2")
+    except importlib.metadata.PackageNotFoundError:
+        version = "source-tree"
+    gnutls = backend_capabilities()
+    return {
+        "schema_version": 1,
+        "name": "netconf-console2",
+        "version": version,
+        "python": sys.version.split()[0],
+        "headless": True,
+        "gui_dependencies_loaded": False,
+        "pyside6_installed": importlib.util.find_spec("PySide6") is not None,
+        "machine_test_api": 1,
+        "transports": {
+            "ssh": {"direct": True, "call_home": True},
+            "tls": {
+                "direct": True,
+                "direct_source_bind": True,
+                "call_home": bool(gnutls.get("available")),
+                "rfc8071_peer_allowed_to_send": bool(gnutls.get("rfc8071_heartbeat")),
+            },
+        },
+        "tls_backends": {
+            "direct_default": "openssl",
+            "call_home_default": "gnutls",
+            "openssl": __import__("ssl").OPENSSL_VERSION,
+            "gnutls": gnutls,
+        },
+    }
 
 
 class OperationArgAction(argparse.Action):
@@ -122,9 +163,13 @@ def report_exception(exc, debug=False):
         # normal error path; exception messages can include custom RPC text.
         print(redact_secrets(traceback.format_exc()), file=sys.stderr, end="")
         return
-    message = redact_secrets(str(exc))
-    if len(message) > 140:
-        message = message[:120] + "..."
+    # The TLS adapter intentionally chains library errors so a peer alert,
+    # certificate-path failure, and local material error remain distinct.
+    from .testapi import format_exception_chain
+
+    message = format_exception_chain(exc)
+    if len(message) > 800:
+        message = message[:780] + "..."
     print("Operation failed: %s - %s" % (exc.__class__.__name__, message), file=sys.stderr)
 
 
@@ -250,6 +295,8 @@ def _add_connection_options(parser, prefix="cmd_"):
     parser.add_argument("--trusted-ca", "--trusted", dest=dest("trusted_ca"), default=None)
     parser.add_argument("--crl", dest=dest("crl"), default=None)
     parser.add_argument("--tls-version", dest=dest("tls_version"), default=None)
+    parser.add_argument("--tls-backend", dest=dest("tls_backend"),
+                        choices=["auto", "openssl", "gnutls"], default=None)
     parser.add_argument("--tls-server-name", "--peername", dest=dest("tls_server_name"), default=None)
     parser.add_argument("--no-hostname-verify", dest=dest("no_hostname_verify"),
                         action="store_true", default=None,
@@ -286,7 +333,7 @@ def command_options_parser(operation=None):
 def argparser():
     parser = argparse.ArgumentParser(
         prog="netconf-console2",
-        description="Windows-native NETCONF CLI for O-RAN O-RU management-plane testing.",
+        description="Headless NETCONF CLI for O-RAN O-RU management-plane testing.",
         parents=[command_options_parser()],
     )
     parser.add_argument("-v", "--version", "--netconf-version", dest="netconf_version",
@@ -315,7 +362,8 @@ def argparser():
                         help="TCP/TLS/SSH connect and hello timeout in seconds.")
     parser.add_argument("--keepalive", dest="keepalive", type=int, default=None,
                         help="SSH keepalive interval in seconds.")
-    parser.add_argument("--bind", dest="bind", default=None, help="Local source address for SSH.")
+    parser.add_argument("--bind", dest="bind", default=None,
+                        help="Local source address for Direct SSH or Direct TLS.")
     parser.add_argument("--agent", dest="allow_agent", action="store_true", default=None,
                         help="Use an SSH agent when available.")
     parser.add_argument("--no-agent", dest="allow_agent", action="store_false")
@@ -326,6 +374,11 @@ def argparser():
                         help="Trusted CA PEM file or directory for TLS peer verification.")
     parser.add_argument("--crl", dest="crl", help="Optional PEM CRL file/directory.")
     parser.add_argument("--tls-version", dest="tls_version", help="TLS version: auto, 1.2, or 1.3.")
+    parser.add_argument(
+        "--tls-backend", choices=["auto", "openssl", "gnutls"], default=None,
+        help=("TLS engine: auto uses OpenSSL for Direct and RFC 8071-capable "
+              "GnuTLS for Call Home."),
+    )
     parser.add_argument("--tls-server-name", "--peername", dest="tls_server_name",
                         help="TLS reference/SNI name (important for Call Home).")
     parser.add_argument("--schema-version", dest="schema_version",
@@ -357,6 +410,21 @@ def argparser():
     parser.add_argument("--huge-tree", action="store_true", default=None, help="Allow very large XML replies.")
     parser.add_argument("--profile", help="Connection profile name.")
     parser.add_argument("--profile-file", help="Use a non-default TOML profile file.")
+    machine_group = parser.add_argument_group("Machine-readable transport probe")
+    machine_group.add_argument(
+        "--test-api", action="store_true",
+        help="Run one hello-only transport probe and emit one JSON result.",
+    )
+    machine_group.add_argument(
+        "--backend-info", action="store_true",
+        help="Print offline JSON build/transport capabilities and exit.",
+    )
+    machine_group.add_argument("--result-file", help="Write the atomic JSON probe result.")
+    machine_group.add_argument("--events-file", help="Write flush-on-event JSON Lines progress.")
+    machine_group.add_argument(
+        "--password-env", metavar="NAME",
+        help="Read the SSH password from this environment variable; the value is never logged.",
+    )
 
     parser.set_defaults(operations=[])
     command_group = parser.add_argument_group("Commands")
@@ -447,6 +515,7 @@ def resolve_namespace(ns):
         "look_for_keys": ("look_for_keys",), "keepalive": ("keepalive",),
         "bind": ("bind",), "cert": ("cert",), "trusted_ca": ("trusted_ca", "trusted"),
         "crl": ("crl",), "tls_version": ("tls_version",),
+        "tls_backend": ("tls_backend",),
         "tls_server_name": ("tls_server_name", "peername"),
         "timeout": ("timeout",), "reply_timeout": ("reply_timeout", "rpc_timeout"),
         "netconf_version": ("netconf_version",),
@@ -476,6 +545,8 @@ def resolve_namespace(ns):
         ns.look_for_keys = True
     if ns.no_hostname_verify is None:
         ns.no_hostname_verify = False
+    if ns.tls_backend is None:
+        ns.tls_backend = "auto"
     if ns.huge_tree is None:
         ns.huge_tree = False
     if ns.hostkey_verify is None:
@@ -528,6 +599,7 @@ def settings_from_namespace(ns, base=None, command=False, call_home=False):
             trusted_ca=ns.trusted_ca,
             crl=ns.crl,
             tls_version=ns.tls_version,
+            tls_backend=ns.tls_backend,
             verify_hostname=not getattr(ns, "no_hostname_verify", False),
             tls_server_name=ns.tls_server_name,
             netconf_version=ns.netconf_version,
@@ -586,6 +658,7 @@ def settings_from_namespace(ns, base=None, command=False, call_home=False):
         trusted_ca=pick("trusted_ca", base.trusted_ca),
         crl=pick("crl", base.crl),
         tls_version=pick("tls_version", base.tls_version),
+        tls_backend=pick("tls_backend", base.tls_backend),
         tls_server_name=pick("tls_server_name", base.tls_server_name),
         verify_hostname=not no_hostname_verify,
         netconf_version=command_version,
@@ -721,7 +794,7 @@ def interactive_operations(exprparser, ctx, ns):
 
 def _prepare_context(ns):
     trace = TraceSink(enabled=ns.trace, filename=ns.trace_file)
-    settings = _prompt_if_needed(settings_from_namespace(ns))
+    settings = _prompt_if_needed(settings_from_namespace(ns, call_home=ns.call_home))
     context = ConsoleContext(settings, trace)
     context.output_mode = ns.output
     _context_command_methods(context)
@@ -783,10 +856,33 @@ def main(argv=None):
     parser = argparser()
     try:
         ns = parser.parse_args(sys.argv[1:] if argv is None else argv)
+        if ns.backend_info:
+            if ns.test_api or ns.operations or ns.filename or ns.interactive:
+                parser.error("--backend-info is offline and cannot be combined with a session or command")
+            print(json.dumps(backend_info(), sort_keys=True))
+            return 0
         ns = resolve_namespace(ns)
     except (ValueError, ParserException) as exc:
         parser.error(str(exc))
         return 2
+    if ns.password_env:
+        value = os.environ.get(ns.password_env)
+        if value is None:
+            parser.error("environment variable %s is not set" % ns.password_env)
+        ns.password = value
+    if ns.test_api:
+        if ns.operations or ns.filename or ns.interactive or ns.format_xml is not None:
+            parser.error("--test-api is hello-only; do not combine it with commands, files or --interactive")
+        from .testapi import run_probe
+
+        settings = settings_from_namespace(ns, call_home=ns.call_home)
+        code, result = run_probe(
+            settings,
+            result_file=ns.result_file,
+            events_file=ns.events_file,
+        )
+        print(json.dumps(result, sort_keys=True))
+        return code
     if ns.format_xml is not None:
         if ns.operations or ns.filename or ns.interactive or ns.call_home:
             parser.error("--format-xml is offline; do not combine it with NETCONF commands or --interactive")

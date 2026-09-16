@@ -58,6 +58,10 @@ class ConnectionSettings:
     trusted_ca: str | None = None
     crl: str | None = None
     tls_version: str | None = None
+    # ``auto`` uses OpenSSL for Direct TLS and the RFC 8071-capable GnuTLS
+    # adapter for TLS Call Home.  Call Home never silently falls back to a
+    # ClientHello that omits peer_allowed_to_send.
+    tls_backend: str = "auto"
     verify_hostname: bool = True
     tls_server_name: str | None = None
     netconf_version: str | None = None
@@ -266,14 +270,28 @@ class TracedTLSSession(transport.TLSSession):
         wrapped = None
         try:
             _phase(self, "auth", "start")
-            context = build_tls_context(settings)
-            wrapped = context.wrap_socket(
-                sock,
-                server_hostname=server_name if server_name else None,
-                do_handshake_on_connect=False,
-            )
-            wrapped.settimeout(settings.timeout if settings.timeout else None)
-            wrapped.do_handshake()
+            backend = str(settings.tls_backend or "auto").lower()
+            if backend not in {"auto", "openssl", "gnutls"}:
+                raise ValueError("TLS backend must be auto, openssl, or gnutls")
+            use_gnutls = backend == "gnutls" or (backend == "auto" and settings.call_home)
+            if use_gnutls:
+                from .gnutls import wrap_client_socket
+
+                wrapped = wrap_client_socket(sock, settings, server_name)
+            else:
+                if settings.call_home:
+                    raise TLSError(
+                        "OpenSSL backend cannot prove RFC 8071 C4 peer_allowed_to_send; "
+                        "use --tls-backend gnutls"
+                    )
+                context = build_tls_context(settings)
+                wrapped = context.wrap_socket(
+                    sock,
+                    server_hostname=server_name if server_name else None,
+                    do_handshake_on_connect=False,
+                )
+                wrapped.settimeout(settings.timeout if settings.timeout else None)
+                wrapped.do_handshake()
             _phase(self, "auth", "done")
             self._host = host
             self._socket = wrapped
@@ -305,7 +323,11 @@ class TracedTLSSession(transport.TLSSession):
             raise TLSError("Missing host")
         try:
             _phase(self, "tcp", "start")
-            sock = socket.create_connection((settings.host, settings.port), timeout=settings.timeout)
+            sock = socket.create_connection(
+                (settings.host, settings.port),
+                timeout=settings.timeout,
+                source_address=(settings.bind, 0) if settings.bind else None,
+            )
             _phase(self, "tcp", "done", str(sock.getpeername()) if getattr(self, "_console_phase", None) else "")
         except OSError as exc:
             raise TLSError("Could not connect to %s:%s" % (settings.host, settings.port)) from exc

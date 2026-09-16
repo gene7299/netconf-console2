@@ -7,6 +7,7 @@ from pathlib import Path
 from netconf_console.ncc import (
     SafeParser,
     argparser,
+    backend_info,
     expression_parser,
     parse_expr_args,
     resolve_namespace,
@@ -16,6 +17,17 @@ from netconf_console.config import get_profile
 
 
 class CliParserTests(unittest.TestCase):
+    def test_backend_info_is_offline_and_machine_readable(self):
+        result = backend_info()
+        self.assertEqual(result["schema_version"], 1)
+        self.assertEqual(result["machine_test_api"], 1)
+        self.assertTrue(result["headless"])
+        self.assertTrue(result["transports"]["tls"]["direct_source_bind"])
+        self.assertEqual(
+            result["transports"]["tls"]["rfc8071_peer_allowed_to_send"],
+            result["tls_backends"]["gnutls"]["rfc8071_heartbeat"],
+        )
+
     def test_pretty_file_options_in_batch_and_interactive_commands(self):
         parsed = resolve_namespace(argparser().parse_args([
             "--get-config", "--db", "running", "--pretty", "--out", "running.xml",

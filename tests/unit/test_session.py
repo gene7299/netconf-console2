@@ -118,8 +118,26 @@ class SessionAdapterTests(unittest.TestCase):
         )
         session = TracedTLSSession(ConsoleDeviceHandler())
         session.connect(settings)
-        create_connection.assert_called_once_with(("2001:db8::10", 6513), timeout=7)
+        create_connection.assert_called_once_with(
+            ("2001:db8::10", 6513), timeout=7, source_address=None
+        )
         connect_socket.assert_called_once_with(raw_socket, settings, "2001:db8::10")
+
+    @patch("netconf_console.session.socket.create_connection")
+    @patch.object(TracedTLSSession, "_connect_socket")
+    def test_direct_tls_connect_applies_source_bind(self, connect_socket, create_connection):
+        raw_socket = object()
+        create_connection.return_value = raw_socket
+        settings = ConnectionSettings(
+            transport="tls", host="192.0.2.10", port=6513, bind="192.0.2.20",
+            cert="client.crt", key="client.key", trusted_ca="ca.pem", timeout=7,
+        )
+        session = TracedTLSSession(ConsoleDeviceHandler())
+        session.connect(settings)
+        create_connection.assert_called_once_with(
+            ("192.0.2.10", 6513), timeout=7, source_address=("192.0.2.20", 0)
+        )
+        connect_socket.assert_called_once_with(raw_socket, settings, "192.0.2.10")
 
     @patch("netconf_console.session.TracedTLSSession._post_connect")
     @patch("netconf_console.session.build_tls_context")
@@ -131,7 +149,7 @@ class SessionAdapterTests(unittest.TestCase):
         raw_socket = MagicMock()
         settings = ConnectionSettings(
             transport="tls", cert="client.crt", key="client.key", trusted_ca="ca.pem", timeout=3,
-            tls_server_name="oru.example",
+            tls_server_name="oru.example", tls_backend="openssl",
         )
         session = TracedTLSSession(ConsoleDeviceHandler())
         session._connect_socket(raw_socket, settings, "192.0.2.12")

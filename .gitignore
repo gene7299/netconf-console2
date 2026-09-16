@@ -22,6 +22,9 @@ dist/
 htmlcov/
 
 # Local secrets and connection material
+netconf_password
+ssh_password
+testkey/
 *.pem
 *.key
 *.crt

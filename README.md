@@ -169,6 +169,29 @@ netconf-console2 --call-home --transport tls --listen-host 0.0.0.0 `
 The TLS Call Home listener accepts TCP, then starts a TLS **client** handshake
 on that accepted socket before starting NETCONF.  This follows RFC 8071: only
 the TCP initiator role is reversed; the NETCONF client remains the TLS client.
+The Ubuntu headless backend uses GnuTLS and advertises RFC 6520 Heartbeat
+`peer_allowed_to_send`, as required by RFC 8071 section 3.1 C4. Use
+`--backend-info` for backend/version inventory and verify formal builds with
+the ClientHello PCAP probe under `tests/integration/rfc8071_heartbeat_probe.py`.
+
+## Structured test API
+
+`--test-api` is the non-interactive contract for test runners. It writes one
+atomic JSON result and optional JSONL phase events instead of requiring prompt,
+`status`, password-dialog or error-text scraping. Passwords can be supplied by
+the name of an environment variable and are never copied into result files.
+
+```bash
+netconf-console2 --backend-info
+netconf-console2 --test-api --transport tls \
+  --host 192.168.9.9 --port 6513 --bind 192.168.9.252 \
+  --cert client-chain.pem --key client.key --trusted-ca ca-chain.pem \
+  --result-file machine-result.json --events-file events.jsonl
+```
+
+The stable classification codes distinguish client-certificate rejection,
+expired client certificate, server chain rejection and server identity
+rejection. A negative test passes only when its expected code is observed.
 
 ## Non-interactive RPC and diagnostics
 

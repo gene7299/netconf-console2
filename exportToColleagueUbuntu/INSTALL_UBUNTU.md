@@ -5,11 +5,16 @@ PySide6 GUI `netconf-console2-gui`。兩個執行檔都已包含 Python 與相�
 使用端不需要另外安裝 Python；TLS 憑證、私鑰、CA 及 SSH known_hosts 仍須由部署
 環境另外提供。
 
+CLI bundle 是 headless 建置，不包含 PySide6 或 tkinter。TLS Call Home 使用隨
+執行檔封裝的 GnuTLS，以送出 RFC 8071 C4 規定的 Heartbeat
+`peer_allowed_to_send`；Direct TLS 預設使用 OpenSSL。
+
 ## 啟動
 
 ```bash
 chmod +x ./netconf-console2
 ./netconf-console2 --help
+./netconf-console2 --backend-info
 ./netconf-console2 --interactive
 ```
 
@@ -34,6 +39,22 @@ Direct SSH：
   --username oranuser --password --interactive
 ```
 
+自動測試請使用 versioned JSON API，避免解析互動 prompt 或錯誤文字：
+
+```bash
+read -rsp 'NETCONF password: ' NETCONF_PASSWORD
+export NETCONF_PASSWORD
+./netconf-console2 --test-api --transport ssh \
+  --host 192.168.9.9 --port 830 --bind 192.168.9.252 \
+  --username oranuser --password-env NETCONF_PASSWORD \
+  --no-agent --no-look-for-keys --no-hostkey-verify \
+  --result-file ./machine-result.json --events-file ./events.jsonl
+unset NETCONF_PASSWORD
+```
+
+`machine-result.json` 包含穩定 classification code、失敗 phase 與 exception
+chain；`events.jsonl` 是可追蹤的 transport/handshake phase。密碼值不寫入兩個檔案。
+
 Direct TLS / mTLS（憑證路徑請依部署位置調整）：
 
 ```bash
@@ -53,6 +74,10 @@ Call Home listener：
   --listen-host 0.0.0.0 --listen-port 4334 \
   --username oranuser --password --interactive
 ```
+
+TLS Call Home 須使用 `--tls-backend gnutls`；`--backend-info` 必須回報
+`rfc8071_peer_allowed_to_send: true`。這個欄位表示 backend 設定，正式能力證據仍應
+從 ClientHello PCAP 確認 extension type 15 的值為 `01`。
 
 GUI 的帳密、草稿、範本與設定備份會以本機使用者的加密金鑰保存於
 `~/.netconf-console2/gui-settings.key`；金鑰檔權限會限制為使用者可讀寫，請勿刪除。
