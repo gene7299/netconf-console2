@@ -19,7 +19,13 @@ hiddenimports = sorted(set(sum((collect_submodules(module) for module in (
     "pyang",
 )), [])))
 
-datas = []
+datas = [
+    # Linux ELF files do not expose a portable per-file icon to file
+    # managers, but keep the shared icon resources inside the CLI bundle for
+    # launchers and future desktop integration.
+    (str(project_root / "packaging" / "assets" / "netconf-console2.ico"), "."),
+    (str(project_root / "packaging" / "assets" / "netconf-console2.png"), "."),
+]
 for distribution in (
     "ncclient",
     "paramiko",
