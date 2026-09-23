@@ -77,6 +77,27 @@ def parse_export(raw):
     return root
 
 
+def export_tree(shell, datastore="running", program="sysrepocfg", timeout=10,
+                defaults_mode="explicit"):
+    """Read the entire datastore; never edit, import, lock or invoke sudo."""
+    if not re.fullmatch(r"(?:/[A-Za-z0-9_.-]+)*/?sysrepocfg", program):
+        raise EditError("僅接受 sysrepocfg 或以 / 開頭的 sysrepocfg 完整路徑。")
+    if datastore not in {"running", "candidate", "startup", "operational"}:
+        raise EditError("不支援的 sysrepocfg datastore。")
+    if defaults_mode not in {"explicit", "report-all"}:
+        raise EditError("不支援的 sysrepocfg default 模式。")
+    if type(timeout) is not int or not 1 <= timeout <= 120:
+        raise EditError("sysrepocfg timeout 需為 1–120 秒。")
+    command = shlex.join([program, "--export", "--datastore", datastore,
+                          "--format", "xml", "--timeout", str(timeout),
+                          "--defaults", defaults_mode])
+    raw, stderr = shell.run(command, timeout=timeout + 10)
+    data = parse_export(raw)
+    if (data.text or "").strip() or any((node.tail or "").strip() for node in data):
+        raise EditError("sysrepocfg 輸出包含非 XML 文字；不當成空資料樹。")
+    return data, redact_secrets(stderr.decode("utf-8", errors="replace"))[:4000]
+
+
 class ShellConnection:
     def __init__(self, settings):
         self.settings = deepcopy(settings)

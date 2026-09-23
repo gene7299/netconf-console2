@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Add bottom colour-coded NETCONF/sysrepocfg DATA TREE tabs to the Qt GUI.
+  The tabs switch only the left tree; the NETCONF XML workspace and controls
+  remain visible. Datastore selection and `Sysrepocfg讀取` live in the System
+  SSH page; the shared DATA TREE `匯出XML` exports whichever tab is active.
+  The sysrepocfg data source remains read-only, while common tree actions are
+  retained as local XML previews and never write through sysrepocfg.
+- Compare a fresh same-device NETCONF read with sysrepocfg data using YANG
+  namespace/list identities. Mark absent nodes red and unverified nodes grey;
+  never equate a failed read or missing schema with permission denial.
+
 ## 3.9.1 - 2026-09-10
 
 - Fix schema-driven creation when a required YANG `choice` is unresolved. The

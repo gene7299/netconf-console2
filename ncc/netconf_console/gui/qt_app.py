@@ -1067,6 +1067,8 @@ class QtMainWindow(QMainWindow):
         self.job_name = ""
         self.snapshot: Snapshot | None = None
         self.selection: Selection | None = None
+        self.sysrepo_selection: Selection | None = None
+        self._saved_netconf_view = None
         self.baseline_text = ""
         self.plan = None
         self.uncertain = False
@@ -1218,7 +1220,8 @@ class QtMainWindow(QMainWindow):
         workspace.setHandleWidth(5)
         outer.addWidget(workspace, 1)
         workspace.addWidget(self._build_tree_panel())
-        workspace.addWidget(self._build_xml_panel())
+        self.xml_panel = self._build_xml_panel()
+        workspace.addWidget(self.xml_panel)
         workspace.setStretchFactor(0, 4)
         workspace.setStretchFactor(1, 6)
         workspace.setSizes([620, 930])
@@ -1642,16 +1645,38 @@ class QtMainWindow(QMainWindow):
         self.admin_connect_button.setMinimumWidth(110)
         self.admin_connect_button.clicked.connect(self.connect_admin)
         grid.addWidget(self.admin_connect_button, 0, 12)
+
+        # Keep the sysrepocfg datastore selector in the System SSH page.
+        # Reading is placed between connect and disconnect below; exporting
+        # is deliberately handled by the shared DATA TREE export button.
+        sysrepo_controls = QWidget()
+        self.sysrepo_controls = sysrepo_controls
+        sysrepo_layout = QGridLayout(sysrepo_controls)
+        sysrepo_layout.setContentsMargins(0, 0, 0, 0)
+        sysrepo_layout.setVerticalSpacing(2)
+        sysrepo_layout.addWidget(QLabel("Datastore"), 0, 0)
+        self.sysrepo_source = QComboBox()
+        self.sysrepo_source.addItems(["running", "candidate", "startup", "operational"])
+        self.sysrepo_source.setMaximumWidth(120)
+        self.sysrepo_source.currentTextChanged.connect(self._sysrepo_source_changed)
+        sysrepo_layout.addWidget(self.sysrepo_source, 0, 1)
+        grid.addWidget(sysrepo_controls, 0, 10, 1, 2)
+        self.sysrepo_read_button = QPushButton("Sysrepocfg讀取")
+        self.sysrepo_read_button.setObjectName("sysrepoReadButton")
+        self.sysrepo_read_button.setMinimumWidth(110)
+        self.sysrepo_read_button.setToolTip("讀取 sysrepocfg DATA TREE")
+        self.sysrepo_read_button.clicked.connect(self.read_sysrepo_tree)
+        grid.addWidget(self.sysrepo_read_button, 1, 12)
         self.admin_disconnect_button = QPushButton("中斷 SSH")
         self.admin_disconnect_button.setObjectName("warningButton")
         self.admin_disconnect_button.setMinimumWidth(110)
         self.admin_disconnect_button.clicked.connect(self.disconnect_admin)
-        grid.addWidget(self.admin_disconnect_button, 1, 12)
+        grid.addWidget(self.admin_disconnect_button, 2, 12)
         self.admin_status = QLabel("系統 SSH 未連線（獨立於 NETCONF）")
         self.admin_status.setMinimumWidth(0)
         self.admin_status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.admin_status.setToolTip(self.admin_status.text())
-        grid.addWidget(self.admin_status, 2, 10, 1, 3)
+        grid.addWidget(self.admin_status, 2, 10, 1, 2)
         page.setToolTip("系統 SSH/sysrepocfg 是獨立的 OS 管理通道，不會繞過 NETCONF NACM；執行前會顯示命令與 XML 預覽。")
         grid.setColumnStretch(10, 1)
         self.tabs.addTab(page, "系統SSH")
@@ -1730,7 +1755,7 @@ class QtMainWindow(QMainWindow):
         options.addWidget(self.checks["state"])
         self.checks["show_candidates"] = QCheckBox("顯示可新增節點")
         self.checks["show_candidates"].setChecked(False)
-        self.checks["show_candidates"].stateChanged.connect(lambda: self._rebuild_tree())
+        self.checks["show_candidates"].stateChanged.connect(self._rebuild_active_tree)
         options.addWidget(self.checks["show_candidates"])
         options.addStretch(1)
         layout.addLayout(options)
@@ -1780,7 +1805,32 @@ class QtMainWindow(QMainWindow):
         self.tree.itemClicked.connect(self._item_clicked)
         self.tree.itemDoubleClicked.connect(self._item_double_clicked)
         self.tree_search.textChanged.connect(self.filter_tree)
-        layout.addWidget(self.tree, 1)
+
+        from .qt_sysrepo_tree import SysrepoTreePanel
+        self.data_tree_tabs = QTabWidget()
+        self.data_tree_tabs.setObjectName("dataTreeTabs")
+        self.data_tree_tabs.setTabPosition(QTabWidget.TabPosition.South)
+        self.data_tree_tabs.setStyleSheet("""
+            QTabWidget#dataTreeTabs > QTabBar::tab { padding: 7px 22px; font-weight: bold; }
+            QTabWidget#dataTreeTabs > QTabBar::tab:first { background: #dbeafe; color: #174ea6; }
+            QTabWidget#dataTreeTabs > QTabBar::tab:last { background: #d1fae5; color: #065f46; }
+            QTabWidget#dataTreeTabs > QTabBar::tab:selected { border-bottom: 4px solid #334155; }
+        """)
+        netconf_tree_page = QWidget()
+        netconf_tree_layout = QVBoxLayout(netconf_tree_page)
+        netconf_tree_layout.setContentsMargins(0, 0, 0, 0)
+        netconf_tree_layout.addWidget(self.tree)
+        self.data_tree_tabs.addTab(netconf_tree_page, "NETCONF")
+        self.sysrepo_tree = SysrepoTreePanel(
+            lambda selection: self._label(selection, self.sysrepo_tree.schema))
+        self.sysrepo_tree.populate_candidates = self._populate_sysrepo_candidates
+        self.sysrepo_tree.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.sysrepo_tree.tree.customContextMenuRequested.connect(self._tree_context_menu)
+        self.sysrepo_tree.tree.itemClicked.connect(self._sysrepo_item_clicked)
+        self.sysrepo_tree.tree.itemDoubleClicked.connect(self._sysrepo_item_double_clicked)
+        self.data_tree_tabs.addTab(self.sysrepo_tree, "sysrepocfg")
+        self.data_tree_tabs.currentChanged.connect(self._data_tree_tab_changed)
+        layout.addWidget(self.data_tree_tabs, 1)
         self.schema_status = QLabel("YANG：未載入")
         self.schema_status.setObjectName("treeFooter")
         return panel
@@ -2334,6 +2384,14 @@ class QtMainWindow(QMainWindow):
             self.checks["state"].setChecked(False)
         self._options_changed()
 
+    def _sysrepo_source_changed(self, source):
+        """Keep the shared state option valid without auto-reading sysrepocfg."""
+        if source not in {"running", "operational"} and self.checks["state"].isChecked():
+            self.checks["state"].blockSignals(True)
+            self.checks["state"].setChecked(False)
+            self.checks["state"].blockSignals(False)
+        self._sync_controls()
+
     def _reconnect_option_changed(self, *_args):
         if not self.checks["auto_reconnect"].isChecked():
             self.reconnect_enabled = False
@@ -2381,6 +2439,12 @@ class QtMainWindow(QMainWindow):
             self._run("自動重新連線…", work, done)
 
     def _options_changed(self, *_args):
+        if self.data_tree_tabs.currentIndex() == 1:
+            if self.admin_connection and self.admin_connection.connected and not self.busy:
+                self.read_sysrepo_tree()
+            else:
+                self._rebuild_active_tree()
+            return
         if self.busy or not self.client.connected or self.snapshot is None:
             return
         self.read_all()
@@ -2524,8 +2588,11 @@ class QtMainWindow(QMainWindow):
         self.admin_requires_refresh = False
         self.snapshot = None
         self.selection = None
+        self.sysrepo_selection = None
+        self._saved_netconf_view = None
         self.plan = None
         self.tree.clear()
+        self.sysrepo_tree.clear()
         self.editor.clear()
         self.preview.clear()
         self.path_label.setText("未連線")
@@ -2554,6 +2621,12 @@ class QtMainWindow(QMainWindow):
                 schema.module_count, len(schema.nodes), "" if schema.complete else "（不完整，唯讀）"))
             if self.snapshot:
                 self._accept_snapshot(self.snapshot)
+            if self.sysrepo_tree.data is not None:
+                self.sysrepo_tree.load(
+                    self.sysrepo_tree.data, self.sysrepo_tree.netconf_data, schema,
+                    self.tree_search.text(), self.checks["show_candidates"].isChecked())
+                if self.data_tree_tabs.currentIndex() == 1:
+                    self._enter_sysrepo_tree_view()
             if schema.warnings:
                 self.status_label.setText("YANG 載入完成但有提醒；" + " ".join(schema.warnings[:2]))
 
@@ -2562,12 +2635,86 @@ class QtMainWindow(QMainWindow):
 
     # ---------- DATA TREE ----------
 
-    def _label(self, selection):
+    def _sysrepo_comparison_reason(self):
+        """Only compare actual connected peers, never editable form fields."""
+        if not self.client.connected:
+            return "NETCONF 未連線；未比較。"
+        context = self.client.context
+        settings = self.admin_settings
+        if context is None or settings is None:
+            return "無法確認兩個通道的設備；未比較。"
+        peer = context.metadata.remote_host
+        if not peer or peer.casefold() != settings.host.casefold():
+            return "NETCONF 與系統 SSH 的設備位址不同；未比較。"
+        netconf = context.settings
+        def route(value):
+            return (value.jump_host, value.jump_port, value.jump_username) if value.jump_enabled else None
+        if route(netconf) != route(settings):
+            return "NETCONF 與系統 SSH 的跳板路徑不同；未比較。"
+        return ""
+
+    def read_sysrepo_tree(self):
+        if self.busy:
+            return
+        if not self.admin_connection or not self.admin_connection.connected:
+            self.status_label.setText("請先在「系統SSH」分頁連線。")
+            return
+        try:
+            timeout = int(self._text("admin_timeout") or "10")
+            reason = self._sysrepo_comparison_reason()
+        except Exception as exc:
+            self.show_error(exc)
+            return
+        from .sysrepo import export_tree
+        shell = self.admin_connection
+        source = self.sysrepo_source.currentText()
+        program = self._text("admin_program")
+        include_defaults = self.checks["defaults"].isChecked()
+        include_state = self.checks["state"].isChecked()
+        export_source = "operational" if include_state else source
+        options = ReadOptions("running" if export_source == "operational" else export_source,
+                              include_defaults, export_source == "operational")
+        schema = self.client.schema
+
+        def work(_progress):
+            data, warning = export_tree(
+                shell, export_source, program, timeout,
+                "report-all" if include_defaults else "explicit")
+            comparison = None
+            detail = reason
+            if not detail:
+                try:
+                    comparison = self.client.read(options).data
+                    detail = "已與同設備 NETCONF 新快照比較（非原子讀取；值變動不標紅）。"
+                except Exception as exc:
+                    detail = "NETCONF 讀取失敗（%s）；未比較。" % type(exc).__name__
+            return data, comparison, detail, warning
+
+        def done(result):
+            data, comparison, detail, warning = result
+            self.sysrepo_tree.load(
+                data, comparison, schema, self.tree_search.text(),
+                self.checks["show_candidates"].isChecked())
+            if self.data_tree_tabs.currentIndex() == 1:
+                self._enter_sysrepo_tree_view()
+            message = "已讀取 sysrepocfg %s（唯讀）；%s" % (export_source, detail)
+            if warning:
+                message += " · " + warning
+            self.status_label.setText(message)
+
+        def failed(exc):
+            self.status_label.setText("sysrepocfg 讀取失敗；保留現有 DATA TREE。")
+            self.show_error(exc)
+
+        self._run("讀取 sysrepocfg DATA TREE…", work, done, failed)
+
+    def _label(self, selection, schema=None):
         node, path = selection.node, selection.path
-        info = self.client.schema.lookup(path)
+        schema = schema if schema is not None else self.client.schema
+        info = schema.lookup(path)
         label = local(node.tag)
         if not selection.ancestors:
-            label = self.client.schema.namespaces.get(etree.QName(node).namespace, label) + " : " + label
+            label = schema.namespaces.get(etree.QName(node).namespace, label) + " : " + label
         if info and info.kind == "list":
             label += " [" + ", ".join(local(key) + "=" + (node.findtext(key) or "") for key in info.keys) + "]"
         elif not children(node) and node.text:
@@ -2618,6 +2765,10 @@ class QtMainWindow(QMainWindow):
             if candidate.reason.startswith("已存在"):
                 continue
             self._candidate_item(parent_item, candidate)
+
+    def _populate_sysrepo_candidates(self, parent_item, parent_node, path):
+        """Use the same schema-driven candidate hints for the sysrepocfg tree."""
+        self._populate_candidates(parent_item, parent_node, path)
 
     def _item_expanded(self, item):
         if isinstance(item.data(0, USER_ROLE), Candidate):
@@ -2675,10 +2826,135 @@ class QtMainWindow(QMainWindow):
         elif parent is None:
             self._open_creation(candidate, self.snapshot.data, ())
 
+    def _is_sysrepo_item(self, item):
+        return bool(item is not None and item.treeWidget() is self.sysrepo_tree.tree)
+
+    def _show_sysrepo_xml(self, node, path):
+        self._set_editor(serialize_xml(node).decode("utf-8"))
+        self.editor.setReadOnly(True)
+        self.path_label.setText("/" + "/".join(local(x) for x in path))
+        self.preview.clear()
+        self.preview_status.setText("sysrepocfg DATA TREE 唯讀；不會送出 NETCONF 修改")
+        self._sync_controls()
+
+    def _sysrepo_preview_child(self, selection):
+        schema = self.sysrepo_tree.schema or self.client.schema
+        info = schema.lookup(selection.path)
+        if not info or info.kind not in {"container", "list"} or info.config is not True:
+            return
+        try:
+            dialog = CreationDialog(schema, deepcopy(selection.node), selection.path, self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            parent = deepcopy(selection.node)
+            parent.append(dialog.result_node)
+            self._show_sysrepo_xml(parent, selection.path)
+        except Exception as exc:
+            self.show_error(exc)
+
+    def _sysrepo_preview_candidate(self, item):
+        """Preview a candidate under its actual sysrepocfg parent, locally."""
+        candidate = item.data(0, USER_ROLE) if item is not None else None
+        if not isinstance(candidate, Candidate) or candidate.reason:
+            return
+        schema = self.sysrepo_tree.schema or self.client.schema
+        parent = item.parent()
+        parent_value = parent.data(0, USER_ROLE) if parent else None
+        if not isinstance(parent_value, Selection):
+            self._sysrepo_preview_root()
+            return
+        try:
+            dialog = CreationDialog(schema, deepcopy(parent_value.node), parent_value.path, self)
+            for index in range(dialog.list.count()):
+                value = dialog.list.item(index).data(USER_ROLE)
+                if value is not None and value.info.path == candidate.info.path:
+                    dialog.list.setCurrentRow(index)
+                    break
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            preview = deepcopy(parent_value.node)
+            preview.append(dialog.result_node)
+            self._show_sysrepo_xml(preview, parent_value.path)
+        except Exception as exc:
+            self.show_error(exc)
+
+    def _sysrepo_preview_root(self):
+        if self.sysrepo_tree.data is None:
+            return
+        try:
+            schema = self.sysrepo_tree.schema or self.client.schema
+            dialog = CreationDialog(schema, self.sysrepo_tree.data, (), self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            node = dialog.result_node
+            self._show_sysrepo_xml(node, (node.tag,))
+        except Exception as exc:
+            self.show_error(exc)
+
+    def _sysrepo_preview_delete(self, selection):
+        if not selection.exists:
+            return
+        try:
+            schema = self.sysrepo_tree.schema or self.client.schema
+            info = schema.lookup(selection.path)
+            parent_info = schema.lookup(selection.path[:-1])
+            if not info or info.config is not True or (parent_info and selection.path[-1] in parent_info.keys):
+                self.status_label.setText("config false／未知 schema 節點不能刪除。")
+                return
+            if selection.ancestors:
+                parent = deepcopy(selection.ancestors[-1])
+                wanted = identity(selection.node, schema, selection.path)
+                matches = [child for child in children(parent)
+                           if child.tag == selection.node.tag
+                           and identity(child, schema, selection.path) == wanted]
+                if len(matches) == 1:
+                    parent.remove(matches[0])
+                self._show_sysrepo_xml(parent, selection.path[:-1])
+            else:
+                self._show_sysrepo_xml(etree.Element("data"), ())
+        except Exception as exc:
+            self.show_error(exc)
+
     def _build_tree_context_menu(self, item):
-        """Build the contextual node-edit menu for one tree item."""
+        """Build the same navigation/edit menu for NETCONF and sysrepocfg trees."""
         value = item.data(0, USER_ROLE) if item is not None else None
-        menu = QMenu(self.tree)
+        sysrepo_item = self._is_sysrepo_item(item)
+        tree = self.sysrepo_tree.tree if sysrepo_item else self.tree
+        menu = QMenu(tree)
+
+        if sysrepo_item:
+            if isinstance(value, Candidate) and not value.reason:
+                create_candidate = menu.addAction("建立此候選節點…")
+                create_candidate.triggered.connect(
+                    lambda _checked=False, target=item: self._sysrepo_preview_candidate(target))
+            if isinstance(value, Selection):
+                schema = self.sysrepo_tree.schema or self.client.schema
+                info = schema.lookup(value.path)
+                show_xml = menu.addAction("在右側顯示此節點 XML")
+                show_xml.triggered.connect(lambda _checked=False, selection=value:
+                                           self._show_sysrepo_selection(selection))
+                show_info = menu.addAction("所選節點 YANG 說明…")
+                show_info.triggered.connect(lambda _checked=False, selection=value:
+                                            self.show_node_info(selection))
+                menu.addSeparator()
+                add_child = menu.addAction("新增子節點／list 項目…")
+                add_child.setEnabled(bool(info and info.kind in {"container", "list"}
+                                          and info.config is True))
+                add_child.triggered.connect(lambda _checked=False, selection=value:
+                                            self._sysrepo_preview_child(selection))
+                delete = menu.addAction("刪除整個節點…")
+                parent_info = schema.lookup(value.path[:-1])
+                is_key = bool(parent_info and value.path[-1] in parent_info.keys)
+                delete.setEnabled(bool(info and info.config is True and not is_key))
+                delete.triggered.connect(lambda _checked=False, selection=value:
+                                         self._sysrepo_preview_delete(selection))
+                add_root = menu.addAction("新增根 YANG 節點…")
+                add_root.setEnabled(self.sysrepo_tree.data is not None)
+                add_root.triggered.connect(self._sysrepo_preview_root)
+                return menu
+            add_root = menu.addAction("新增根 YANG 節點…")
+            add_root.triggered.connect(self._sysrepo_preview_root)
+            return menu
 
         if isinstance(value, Candidate) and not value.reason:
             create_candidate = menu.addAction("建立此候選節點…")
@@ -2720,10 +2996,11 @@ class QtMainWindow(QMainWindow):
         """Offer node edits at the pointer; double-click is navigation only."""
         if self.busy:
             return
-        menu = self._build_tree_context_menu(self.tree.itemAt(position))
+        tree = self.sysrepo_tree.tree if self.data_tree_tabs.currentIndex() == 1 else self.tree
+        menu = self._build_tree_context_menu(tree.itemAt(position))
         if not menu.actions():
             return
-        menu.exec(self.tree.viewport().mapToGlobal(position))
+        menu.exec(tree.viewport().mapToGlobal(position))
 
     def _rebuild_tree(self):
         if self.snapshot is None:
@@ -2792,6 +3069,81 @@ class QtMainWindow(QMainWindow):
             self.tree.setCurrentItem(self.tree.topLevelItem(0))
         self.tree_search_count.setText("500 筆上限" if len(found) >= 500 else "%d 筆" % len(found))
 
+    def _data_tree_tab_changed(self, index):
+        """Change only the left DATA TREE model; keep the NETCONF workspace."""
+        if index == 1:
+            self._enter_sysrepo_tree_view()
+            count = self.sysrepo_tree.rebuild(
+                self.tree_search.text(), self.checks["show_candidates"].isChecked())
+            self.tree_search_count.setText("" if not self.tree_search.text().strip()
+                                           else ("500 筆上限" if count >= 500 else "%d 筆" % count))
+        else:
+            self._leave_sysrepo_tree_view()
+            self._rebuild_tree()
+
+    def _enter_sysrepo_tree_view(self):
+        """Preserve a NETCONF draft while the right pane browses sysrepocfg."""
+        if self._saved_netconf_view is None:
+            self._saved_netconf_view = (
+                self.selection, self.baseline_text, self.editor.toPlainText(),
+                self.path_label.text(), self.preview.toPlainText(), self.preview_status.text())
+        self.sysrepo_selection = None
+        self.selection = None
+        self.plan = None
+        self._set_editor("")
+        self.path_label.setText("sysrepocfg DATA TREE")
+        self.preview.clear()
+        self.preview_status.setText("sysrepocfg DATA TREE 唯讀；請選取左側節點")
+        self._sync_controls()
+
+    def _leave_sysrepo_tree_view(self):
+        if self._saved_netconf_view is None:
+            return
+        selection, baseline, editor_text, path, preview_text, preview_status = self._saved_netconf_view
+        self._saved_netconf_view = None
+        self.sysrepo_selection = None
+        self.selection = selection
+        self.baseline_text = baseline
+        self._set_editor(editor_text)
+        self.path_label.setText(path)
+        self.preview.setPlainText(preview_text)
+        self.preview_status.setText(preview_status)
+        if self.selection:
+            self.update_preview()
+        else:
+            self.plan = None
+        self._sync_controls()
+
+    def _show_sysrepo_selection(self, selection):
+        if not isinstance(selection, Selection):
+            return
+        self.sysrepo_selection = selection
+        self.selection = None
+        self.plan = None
+        self._set_editor(selection.text())
+        self.editor.setReadOnly(True)
+        self.path_label.setText("/" + "/".join(local(x) for x in (*selection.ancestors, selection.node)))
+        self.preview.clear()
+        self.preview_status.setText("sysrepocfg DATA TREE 唯讀；不會送出 NETCONF 修改")
+        self._sync_controls()
+
+    def _sysrepo_item_clicked(self, item, _column):
+        value = item.data(0, USER_ROLE)
+        if isinstance(value, Selection):
+            self._show_sysrepo_selection(value)
+
+    def _sysrepo_item_double_clicked(self, item, _column):
+        value = item.data(0, USER_ROLE)
+        if isinstance(value, Selection):
+            self._show_sysrepo_selection(value)
+
+    def _rebuild_active_tree(self, *_args):
+        if self.data_tree_tabs.currentIndex() == 1:
+            self.sysrepo_tree.rebuild(
+                self.tree_search.text(), self.checks["show_candidates"].isChecked())
+        else:
+            self._rebuild_tree()
+
     def _accept_snapshot(self, snapshot):
         self.uncertain = False
         self.admin_requires_refresh = False
@@ -2829,7 +3181,12 @@ class QtMainWindow(QMainWindow):
         self.update_preview()
 
     def filter_tree(self, text):
-        del text
+        if self.data_tree_tabs.currentIndex() == 1:
+            count = self.sysrepo_tree.rebuild(
+                text, self.checks["show_candidates"].isChecked())
+            self.tree_search_count.setText("" if not str(text).strip()
+                                           else ("500 筆上限" if count >= 500 else "%d 筆" % count))
+            return
         if self.snapshot is None:
             self.tree_search_count.setText("")
             return
@@ -2937,6 +3294,16 @@ class QtMainWindow(QMainWindow):
             self.show_error(exc)
 
     def revert(self):
+        if self.data_tree_tabs.currentIndex() == 1:
+            if self.sysrepo_selection:
+                self._show_sysrepo_selection(self.sysrepo_selection)
+            elif self.editor.toPlainText().strip():
+                self._set_editor("")
+                self.path_label.setText("sysrepocfg DATA TREE")
+                self.preview.clear()
+                self.preview_status.setText("sysrepocfg DATA TREE 唯讀；請選取左側節點")
+                self._sync_controls()
+            return
         if self.selection:
             if self.selection.delete:
                 self.selection = Selection(self.selection.node, self.selection.ancestors,
@@ -2945,27 +3312,44 @@ class QtMainWindow(QMainWindow):
             self.update_preview()
 
     def export_editor(self):
-        if not self.selection:
+        active_sysrepo = self.data_tree_tabs.currentIndex() == 1
+        if active_sysrepo:
+            text = self.editor.toPlainText()
+            if not text.strip() and not self.sysrepo_selection:
+                return
+            default_name = "sysrepocfg-selection.xml"
+        elif self.selection:
+            text = self.editor.toPlainText()
+            default_name = "selection.xml"
+        else:
             return
-        filename, _ = QFileDialog.getSaveFileName(self, "匯出 XML", "selection.xml", "XML (*.xml)")
+        filename, _ = QFileDialog.getSaveFileName(self, "匯出 XML", default_name, "XML (*.xml)")
         if not filename:
             return
         try:
-            parse_editor(self.editor.toPlainText())
-            Path(filename).write_text(self.editor.toPlainText(), encoding="utf-8", newline="\n")
+            parse_editor(text)
+            Path(filename).write_text(text, encoding="utf-8", newline="\n")
             self.status_label.setText("已匯出 UTF-8 XML：" + filename)
         except Exception as exc:
             self.show_error(exc)
 
     def export_tree(self):
-        if not self.snapshot:
+        active_sysrepo = self.data_tree_tabs.currentIndex() == 1
+        data = self.sysrepo_tree.data if active_sysrepo else (self.snapshot.data if self.snapshot else None)
+        if data is None:
+            self.status_label.setText("目前沒有可匯出的 DATA TREE。")
             return
-        filename, _ = QFileDialog.getSaveFileName(self, "匯出 DATA TREE", "netconf-running-tree.xml", "XML (*.xml)")
+        default_name = "sysrepocfg-tree.xml" if active_sysrepo else "netconf-running-tree.xml"
+        filename, _ = QFileDialog.getSaveFileName(self, "匯出 DATA TREE", default_name, "XML (*.xml)")
         if filename:
-            Path(filename).write_bytes(serialize_xml(self.snapshot.data))
-            self.status_label.setText("已匯出目前 DATA TREE 快照：" + filename)
+            Path(filename).write_bytes(serialize_xml(data))
+            source = "sysrepocfg" if active_sysrepo else "NETCONF"
+            self.status_label.setText("已匯出 %s DATA TREE 快照：%s" % (source, filename))
 
     def refresh_selected(self):
+        if self.data_tree_tabs.currentIndex() == 1:
+            self.read_sysrepo_tree()
+            return
         if not self.client.connected or not self.selection or not self.snapshot or self.busy:
             return
         root_tag = self.selection.path[0]
@@ -2995,6 +3379,9 @@ class QtMainWindow(QMainWindow):
     # ---------- node creation/deletion ----------
 
     def new_root_node(self):
+        if self.data_tree_tabs.currentIndex() == 1:
+            self._sysrepo_preview_root()
+            return
         if not self.snapshot:
             self.status_label.setText("請先讀取 running/candidate 與完整 YANG schema。")
             return
@@ -3014,6 +3401,12 @@ class QtMainWindow(QMainWindow):
             self.show_error(exc)
 
     def new_node(self):
+        if self.data_tree_tabs.currentIndex() == 1:
+            if self.sysrepo_selection:
+                self._sysrepo_preview_child(self.sysrepo_selection)
+            else:
+                self.status_label.setText("請先選取 sysrepocfg DATA TREE 的 container/list。")
+            return
         if not self.selection or not self.snapshot:
             self.status_label.setText("請先選取要加入子節點的 container/list。")
             return
@@ -3097,6 +3490,12 @@ class QtMainWindow(QMainWindow):
         return result
 
     def delete_selected(self):
+        if self.data_tree_tabs.currentIndex() == 1:
+            if self.sysrepo_selection:
+                self._sysrepo_preview_delete(self.sysrepo_selection)
+            else:
+                self.status_label.setText("請先選取 sysrepocfg DATA TREE 節點。")
+            return
         selection = self.selection
         if not selection or not self.snapshot:
             return
@@ -3247,6 +3646,7 @@ class QtMainWindow(QMainWindow):
             shell.connect()
             return shell
         def done(shell):
+            self.sysrepo_tree.clear()
             self.admin_connection = shell
             self.admin_settings = settings
             self.admin_status.setText("系統 SSH：%s@%s:%s（非 NETCONF）" % (settings.username, settings.host, settings.port))
@@ -3259,6 +3659,10 @@ class QtMainWindow(QMainWindow):
         self._run("中斷系統 SSH…", lambda _progress: shell.close(), lambda _value: self._clear_admin())
 
     def _clear_admin(self):
+        self.sysrepo_tree.clear()
+        self.sysrepo_selection = None
+        if self.data_tree_tabs.currentIndex() == 1:
+            self._enter_sysrepo_tree_view()
         self.admin_connection = None
         self.admin_settings = None
         self.admin_status.setText("系統 SSH 已中斷；NETCONF 連線不受影響。")
@@ -3603,6 +4007,10 @@ class QtMainWindow(QMainWindow):
         dialog.show()
 
     def open_leaf_editor(self):
+        if self.data_tree_tabs.currentIndex() == 1:
+            if self.sysrepo_selection:
+                self.show_node_info(self.sysrepo_selection)
+            return
         if (not self.selection or not self.snapshot or self.busy or self.lifecycle_dialog
                 or self._pending() or not self.client.schema.complete):
             return
@@ -3886,7 +4294,9 @@ class QtMainWindow(QMainWindow):
         self.status_label.setText("XML 搜尋：%d 筆（最多標示 5000 筆）" % count)
 
     def search_tree(self):
-        if self.busy or self.snapshot is None:
+        active_sysrepo = self.data_tree_tabs.currentIndex() == 1
+        source_data = self.sysrepo_tree.data if active_sysrepo else (self.snapshot.data if self.snapshot else None)
+        if self.busy or source_data is None:
             return
         dialog = QDialog(self)
         dialog.setWindowTitle("搜尋 DATA TREE（目前快照；名稱、module 路徑、值、description）")
@@ -3903,17 +4313,25 @@ class QtMainWindow(QMainWindow):
         results = QListWidget()
         layout.addWidget(results, 1)
         found = []
-        snapshot = self.snapshot
+        schema = self.sysrepo_tree.schema if active_sysrepo else self.client.schema
+        source_tab = self.data_tree_tabs.currentIndex()
+
         def search():
-            found[:] = search_snapshot(snapshot.data, self.client.schema, entry.text())
+            found[:] = search_snapshot(source_data, schema, entry.text())
             results.clear()
             for label, _selection in found:
                 results.addItem(label)
+
         def jump():
             row = results.currentRow()
-            if row < 0 or row >= len(found) or self.snapshot is not snapshot:
+            current_data = self.sysrepo_tree.data if source_tab == 1 else (self.snapshot.data if self.snapshot else None)
+            if (row < 0 or row >= len(found) or self.data_tree_tabs.currentIndex() != source_tab
+                    or current_data is not source_data):
                 return
-            self._show_selection(found[row][1])
+            if source_tab == 1:
+                self._show_sysrepo_selection(found[row][1])
+            else:
+                self._show_selection(found[row][1])
             dialog.accept()
         search_button.clicked.connect(search)
         jump_button.clicked.connect(jump)
@@ -3921,11 +4339,12 @@ class QtMainWindow(QMainWindow):
         results.itemDoubleClicked.connect(lambda _item: jump())
         dialog.show()
 
-    def show_node_info(self):
-        if not self.selection:
+    def show_node_info(self, selection=None):
+        selection = selection or self.selection or self.sysrepo_selection
+        if not selection:
             return
-        info = self.client.schema.lookup(self.selection.path)
-        lines = ["/" + "/".join(local(x) for x in self.selection.path), ""]
+        info = self.client.schema.lookup(selection.path)
+        lines = ["/" + "/".join(local(x) for x in selection.path), ""]
         if info:
             lines += ["Module: " + info.module, "Kind: " + info.kind,
                       "config: " + str(info.config), "Type: " + info.type_name,
@@ -5111,28 +5530,47 @@ class QtMainWindow(QMainWindow):
         self.disconnect_button.setEnabled(connected or self.busy or self.reconnect_due is not None)
         self.stop_reconnect_button.setEnabled(bool(self.reconnect_enabled or self.reconnect_due is not None
                                                   or self.job_name == "自動重新連線…"))
+        active_sysrepo = self.data_tree_tabs.currentIndex() == 1
         has_rpc = self.plan is not None and self.plan.rpc is not None
         can_rpc = connected and idle and has_rpc and not self.uncertain and self.snapshot is not None
-        self.netconf_button.setEnabled(can_rpc and self.snapshot.options.source != "startup")
-        self.sysrepo_button.setEnabled(idle and bool(self.admin_connection and self.admin_connection.connected)
+        self.netconf_button.setEnabled(not active_sysrepo and can_rpc and self.snapshot.options.source != "startup")
+        self.sysrepo_button.setEnabled(not active_sysrepo and idle and bool(self.admin_connection and self.admin_connection.connected)
                                        and can_rpc and self.snapshot.options.source == "running"
                                        and not self.admin_requires_refresh)
         self.read_button.setEnabled(connected and idle)
         self.tree_schema_button.setEnabled(connected and idle)
         self.refresh_schema_button.setEnabled(connected and idle)
-        self.tree_export_button.setEnabled(bool(self.snapshot) and idle)
+        has_active_tree = (self.sysrepo_tree.data is not None
+                           if active_sysrepo else self.snapshot is not None)
+        self.tree_export_button.setEnabled(idle and has_active_tree)
         self.checks["defaults"].setEnabled(idle)
-        self.checks["state"].setEnabled(idle and self.source_box.currentText() == "running")
+        self.checks["state"].setEnabled(
+            idle and (self.sysrepo_source.currentText() in {"running", "operational"}
+                      if active_sysrepo else self.source_box.currentText() == "running"))
         self.checks["show_candidates"].setEnabled(idle)
         selection_editable = self.selection is not None and not self.selection.delete
+        sysrepo_selection_editable = bool(active_sysrepo and self.sysrepo_selection)
         self.add_child_button.setEnabled(idle and selection_editable and not self._draft_guard().startswith("此範圍"))
-        self.add_root_button.setEnabled(idle and self.snapshot is not None)
-        self.delete_button.setEnabled(idle and selection_editable)
+        if active_sysrepo:
+            info = self.client.schema.lookup(self.sysrepo_selection.path) if self.sysrepo_selection else None
+            self.add_child_button.setEnabled(idle and bool(info and info.kind in {"container", "list"}
+                                                          and info.config is True))
+            self.add_root_button.setEnabled(idle and self.sysrepo_tree.data is not None)
+            parent_info = self.client.schema.lookup(self.sysrepo_selection.path[:-1]) if self.sysrepo_selection else None
+            is_key = bool(parent_info and self.sysrepo_selection.path[-1] in parent_info.keys) if self.sysrepo_selection else False
+            self.delete_button.setEnabled(idle and bool(info and info.config is True and not is_key))
+        else:
+            self.add_root_button.setEnabled(idle and self.snapshot is not None)
+            self.delete_button.setEnabled(idle and selection_editable)
         for button in (self.pretty_button, self.revert_button, self.refresh_selected_button,
                        self.export_editor_button):
-            button.setEnabled(idle and self.selection is not None)
-        self.editor.setReadOnly(not (idle and selection_editable))
+            has_sysrepo_xml = active_sysrepo and bool(self.editor.toPlainText().strip())
+            button.setEnabled(idle and (self.selection is not None or sysrepo_selection_editable
+                                        or has_sysrepo_xml))
+        self.editor.setReadOnly(active_sysrepo or not (idle and selection_editable))
         admin_online = bool(self.admin_connection and self.admin_connection.connected)
+        self.sysrepo_read_button.setEnabled(idle and admin_online)
+        self.sysrepo_source.setEnabled(idle)
         self.admin_connect_button.setEnabled(idle and not admin_online)
         self.admin_disconnect_button.setEnabled(idle and admin_online)
         if admin_online:
@@ -5210,6 +5648,9 @@ def build_application():
         QPushButton#adminConnectButton { background: #0969da; color: white; font-weight: 700; }
         QPushButton#adminConnectButton:disabled { background: #d8e1ec; color: #708096; }
         QPushButton#adminConnectButton[connected="true"], QPushButton#adminConnectButton[connected="true"]:disabled { background: #15803d; color: white; border: 1px solid #166534; }
+        QPushButton#sysrepoReadButton { background: #0f766e; color: white; border: 1px solid #115e59; font-weight: 700; }
+        QPushButton#sysrepoReadButton:hover { background: #0d9488; }
+        QPushButton#sysrepoReadButton:disabled { background: #d8e1ec; color: #708096; border: 1px solid #c7d2df; }
         QPushButton#netconfButton { background: #15803d; color: white; font-weight: 700; padding: 7px 14px; }
         QPushButton#netconfButton:disabled { background: #d8e1ec; color: #708096; }
         QPushButton#sysrepoButton { background: #b91c1c; color: white; font-weight: 700; padding: 7px 14px; }
@@ -5262,6 +5703,11 @@ def install_qt_exception_hook():
 
 
 def self_test(window):
+    # Exercise the bundled read-only DATA TREE tab without sockets.
+    repo_data = etree.fromstring(b'<data><private xmlns="urn:self-test"><value>1</value></private></data>')
+    window.sysrepo_tree.load(repo_data, etree.fromstring(b'<data/>'), window.client.schema)
+    window.data_tree_tabs.setCurrentIndex(1)
+    repo_item = window.sysrepo_tree.tree.topLevelItem(0)
     required = {
         "connection_modes": list(MODES),
         "settings_tabs": [window.tabs.tabText(i) for i in range(window.tabs.count())],
@@ -5274,6 +5720,11 @@ def self_test(window):
         "xml_editor": window.editor is not None,
         "preview": window.preview is not None,
         "creation_picker": CreationDialog.__doc__ is not None,
+        "data_tree_tabs": [window.data_tree_tabs.tabText(i) for i in range(window.data_tree_tabs.count())],
+        "data_tree_tabs_bottom": window.data_tree_tabs.tabPosition() == QTabWidget.TabPosition.South,
+        "sysrepo_missing_red": repo_item.foreground(0).color().name() == "#b42332",
+        "netconf_workspace_kept": window.xml_panel is not None and window.editor is not None,
+        "sysrepo_controls_in_system_ssh": window.sysrepo_source is not None and window.sysrepo_read_button is not None,
     }
     passed = (required["source_default"] == "running"
               and required["settings_tabs"][:1] in (["NETCONF連線"], ["NETCONF Connection"])
@@ -5283,7 +5734,12 @@ def self_test(window):
               and required["tls_hostname_default"] is False
               and required["main_splitter"] and required["tree"]
               and required["xml_editor"] and required["preview"]
-              and required["creation_picker"])
+              and required["creation_picker"]
+              and required["data_tree_tabs"] == ["NETCONF", "sysrepocfg"]
+              and required["data_tree_tabs_bottom"] and required["sysrepo_missing_red"]
+              and required["netconf_workspace_kept"] and required["sysrepo_controls_in_system_ssh"])
+    window.sysrepo_tree.clear()
+    window.data_tree_tabs.setCurrentIndex(0)
     return {"passed": passed, "qt": "PySide6", "version": VERSION, "checks": required}
 
 

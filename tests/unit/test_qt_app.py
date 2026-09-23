@@ -3,7 +3,8 @@
 import os
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -50,6 +51,133 @@ class QtWorkspaceTests(unittest.TestCase):
         self.assertLessEqual(self.window.width(), 1280)
         self.assertGreaterEqual(self.window.height(), self.window.minimumHeight())
         self.assertLessEqual(self.window.height(), 800)
+
+    def test_sysrepo_bottom_tabs_and_readonly_preview_preserve_draft(self):
+        window = self.window
+        self.assertEqual(window.data_tree_tabs.tabPosition(), window.data_tree_tabs.TabPosition.South)
+        self.assertEqual([window.data_tree_tabs.tabText(i) for i in range(2)], ["NETCONF", "sysrepocfg"])
+        original = window.editor.toPlainText().replace("Fronthaul", "kept-draft")
+        window.editor.setPlainText(original)
+        old_snapshot, old_selection = window.snapshot, window.selection
+        panel = window.sysrepo_tree
+        xml_panel = window.xml_panel
+        repo = etree.fromstring(b'<data><private xmlns="urn:private"><value>42</value></private></data>')
+        panel.load(repo, window.snapshot.data, window.client.schema)
+        window.data_tree_tabs.setCurrentIndex(1)
+        self.assertIs(window.xml_panel, xml_panel)
+        self.assertIs(window.data_tree_tabs.currentWidget(), panel)
+        item = panel.tree.topLevelItem(0)
+        self.assertEqual(item.foreground(0).color().name(), "#b42332")
+        panel.expand(item)
+        self.assertEqual(item.child(0).foreground(0).color().name(), "#b42332")
+        window.tree_search.setText("42")
+        self.assertEqual(panel.tree.topLevelItemCount(), 1)
+        self.assertEqual(panel.tree.topLevelItem(0).childCount(), 1)
+        self.assertIs(window.xml_panel, xml_panel)
+        self.assertEqual(window.editor.toPlainText(), "")
+        self.assertTrue(window.editor.isReadOnly())
+        selected = panel.tree.topLevelItem(0).child(0).data(0, Qt.ItemDataRole.UserRole)
+        panel.tree.setCurrentItem(panel.tree.topLevelItem(0).child(0))
+        window._show_sysrepo_selection(selected)
+        self.assertIn("private", window.editor.toPlainText())
+        window.data_tree_tabs.setCurrentIndex(0)
+        self.assertEqual(window.editor.toPlainText(), original)
+        self.assertIs(window.snapshot, old_snapshot)
+        self.assertIs(window.selection, old_selection)
+
+    def _sysrepo_connection_fixture(self):
+        from netconf_console.session import ConnectionSettings
+        window = self.window
+        settings = ConnectionSettings(host="192.0.2.10", username="admin")
+        window.admin_settings = settings
+        window.admin_connection = Mock(connected=True)
+        window.client.context = SimpleNamespace(settings=settings,
+                                                metadata=SimpleNamespace(remote_host=settings.host))
+        def synchronous(_label, work, done, failed=None):
+            try:
+                result = work(lambda _message: None)
+            except Exception as exc:
+                if failed:
+                    failed(exc)
+                else:
+                    raise
+            else:
+                done(result)
+        window._run = synchronous
+        return window
+
+    def test_sysrepo_refresh_uses_matching_netconf_read_without_overwriting_editor(self):
+        from netconf_console.gui.client import ReadOptions
+        window = self._sysrepo_connection_fixture()
+        original = window.editor.toPlainText()
+        old_snapshot = window.snapshot
+        window.checks["defaults"].blockSignals(True)
+        window.checks["defaults"].setChecked(False)
+        window.checks["defaults"].blockSignals(False)
+        with patch("netconf_console.gui.sysrepo.export_tree", return_value=(old_snapshot.data, "")), \
+                patch.object(window.client, "read", wraps=window.client.read) as read:
+            window.sysrepo_source.setCurrentText("operational")
+            window.read_sysrepo_tree()
+            read.assert_called_once_with(ReadOptions("running", False, True))
+        self.assertIs(window.snapshot, old_snapshot)
+        self.assertEqual(window.editor.toPlainText(), original)
+        self.assertIn("operational", window.status_label.text())
+
+    def test_sysrepo_failed_netconf_read_remains_unknown(self):
+        window = self._sysrepo_connection_fixture()
+        with patch("netconf_console.gui.sysrepo.export_tree", return_value=(window.snapshot.data, "")), \
+                patch.object(window.client, "read", side_effect=RuntimeError("denied")):
+            window.read_sysrepo_tree()
+        self.assertEqual(set(window.sysrepo_tree.states.values()), {"unknown"})
+        self.assertIn("未比較", window.status_label.text())
+
+    def test_sysrepo_different_device_skips_comparison_and_disconnect_clears(self):
+        window = self._sysrepo_connection_fixture()
+        window.client.context.metadata.remote_host = "192.0.2.11"
+        with patch("netconf_console.gui.sysrepo.export_tree", return_value=(window.snapshot.data, "")), \
+                patch.object(window.client, "read") as read:
+            window.read_sysrepo_tree()
+            read.assert_not_called()
+        self.assertEqual(set(window.sysrepo_tree.states.values()), {"unknown"})
+        window._clear_admin()
+        self.assertIsNone(window.sysrepo_tree.data)
+
+    def test_sysrepo_ssh_failure_keeps_previous_snapshot_and_reports_error(self):
+        window = self._sysrepo_connection_fixture()
+        previous = window.snapshot.data
+        window.sysrepo_tree.load(previous, None, window.client.schema)
+        with patch("netconf_console.gui.sysrepo.export_tree", side_effect=TimeoutError()), \
+                patch.object(window.client, "read") as read, \
+                patch.object(window, "show_error") as error:
+            window.read_sysrepo_tree()
+            read.assert_not_called()
+            error.assert_called_once()
+        self.assertIs(window.sysrepo_tree.data, previous)
+        self.assertIn("保留現有 DATA TREE", window.status_label.text())
+
+    def test_sysrepo_jump_mismatch_and_unconnected_channels(self):
+        window = self._sysrepo_connection_fixture()
+        window.admin_settings = window.admin_settings.copy(jump_enabled=True, jump_host="192.0.2.20")
+        self.assertIn("跳板路徑不同", window._sysrepo_comparison_reason())
+        window.admin_connection = None
+        with patch("netconf_console.gui.sysrepo.export_tree") as export:
+            window.read_sysrepo_tree()
+            export.assert_not_called()
+
+    def test_sysrepo_worker_returns_to_gui_thread(self):
+        window = self._sysrepo_connection_fixture()
+        window._run = QtMainWindow._run.__get__(window)
+        with patch("netconf_console.gui.sysrepo.export_tree", return_value=(window.snapshot.data, "")):
+            window.read_sysrepo_tree()
+            self.assertTrue(window.busy)
+            deadline = time.monotonic() + 5
+            while (window.busy or window._task_thread is not None) and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+            self.assertFalse(window.busy)
+            self.assertIsNone(window._task_thread)
+            self.assertIsNotNone(window.sysrepo_tree.data)
+            self.assertTrue(window.tree_export_button.isEnabled())
 
     def test_inline_tree_search_finds_collapsed_nodes_and_restores_tree(self):
         original_roots = self.window.tree.topLevelItemCount()
@@ -289,8 +417,16 @@ class QtWorkspaceTests(unittest.TestCase):
         admin = self.window.admin_grid
         self.assertEqual(admin.getItemPosition(admin.indexOf(self.window.admin_connect_button)),
                          (0, 12, 1, 1))
-        self.assertEqual(admin.getItemPosition(admin.indexOf(self.window.admin_disconnect_button)),
+        self.assertEqual(admin.getItemPosition(admin.indexOf(self.window.sysrepo_read_button)),
                          (1, 12, 1, 1))
+        self.assertEqual(admin.getItemPosition(admin.indexOf(self.window.admin_disconnect_button)),
+                         (2, 12, 1, 1))
+        self.assertEqual(admin.getItemPosition(admin.indexOf(self.window.sysrepo_controls)),
+                         (0, 10, 1, 2))
+        self.assertIs(self.window.sysrepo_source.parentWidget(), self.window.sysrepo_controls)
+        self.assertEqual(self.window.sysrepo_read_button.text(), "Sysrepocfg讀取")
+        self.assertEqual(self.window.sysrepo_read_button.objectName(), "sysrepoReadButton")
+        self.assertIn("#sysrepoReadButton", self.app.styleSheet())
 
         def last_occupied_row(grid):
             return max(grid.getItemPosition(index)[0] + grid.getItemPosition(index)[2] - 1

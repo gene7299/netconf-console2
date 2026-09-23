@@ -223,6 +223,20 @@ SSH/sysrepocfg settings; Save As asks for a new name and never silently reuses a
 profile.
 Both catalogs support search, rename, load-for-edit and confirmed batch deletion.
 Both the XML editor and the complete loaded DATA TREE can be exported as UTF-8 XML.
+The Qt GUI also has bottom, colour-coded **NETCONF / sysrepocfg** DATA TREE tabs.
+The tabs switch only the left DATA TREE; the NETCONF XML editor and its actions
+remain visible. Connect the independent system SSH channel, choose running,
+candidate, startup or operational in its right-side sysrepocfg controls, then
+press `Sysrepocfg讀取`. The sysrepocfg data source is read-only, while the
+shared DATA TREE `匯出XML` button exports whichever tab is active. The common
+tree actions remain available as local XML previews and never write through
+sysrepocfg.
+When the connected device address and jump route match, a fresh NETCONF read is
+compared by YANG namespace and list keys: red text means absent from that NETCONF
+snapshot, not proof of access denial. Grey means unverified (including failed
+NETCONF reads or ambiguous identities). Neither switching tabs nor reading this
+tree replaces the NETCONF workspace or overwrites edit drafts; reading does not
+write configuration to the device.
 The advanced tab exports password-free JSON or encrypted full backups. The connection
 panel can collapse, tree folds survive refresh, and opt-in reconnection preserves
 drafts without replaying writes. Native window/taskbar icons use a dedicated app ID.

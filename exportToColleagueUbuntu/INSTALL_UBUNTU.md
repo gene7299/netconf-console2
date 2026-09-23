@@ -31,6 +31,23 @@ chmod +x ./netconf-console2-gui
 ./netconf-console2-gui --demo
 ```
 
+### GUI：sysrepocfg DATA TREE
+
+左側樹狀視窗底部提供藍色 **NETCONF** 與綠色 **sysrepocfg** 頁籤。
+在上方「系統SSH」先連線設備，再選擇 datastore 並按「Sysrepocfg讀取」。
+支援 running、candidate、startup、operational；sysrepocfg tab 只切換左側 DATA TREE，
+右側仍維持 NETCONF XML 編輯器與原有功能，不會覆蓋 NETCONF 草稿；共用的「匯出XML」
+會依目前選取的 tab 匯出 NETCONF 或 sysrepocfg DATA TREE。
+設備上需已安裝 `sysrepocfg`，且系統 SSH 帳號具有 sysrepo 讀取權限。
+
+- 紅字：同設備、對應 datastore 的 NETCONF 新快照中未出現的節點；不是權限拒絕的證明。
+- 灰字：尚未比較、NETCONF 讀取失敗或 schema/list key 不足，無法判定。
+- 位址／跳板不同或 NETCONF 未連線時仍可讀取 sysrepocfg，但不自動比較。
+- sysrepocfg 資料來源是唯讀；共用選取、YANG 說明、右鍵新增／刪除預覽、Pretty、還原、
+  重新讀取、XML 匯出與搜尋功能仍可使用。新增／刪除只建立本機 XML 預覽，不會寫入設備。
+
+比較結果屬於當次快照；設備資料或權限改變後，請重新讀取。
+
 Direct SSH：
 
 ```bash

@@ -651,6 +651,39 @@ replayComplete 只表示歷史部分播完，不代表即時訂閱停止。
 未連線、草稿未處理、結果待確認、訂閱限制或限時提交進行中。
 「設定操作 → 查看功能停用原因」可一次查看狀態。不會为了啟用按鈕而繞過安全檢查。
 
+## Qt GUI：NETCONF / sysrepocfg DATA TREE 切換
+
+左側 DATA TREE 下方新增彩色頁籤：**NETCONF（藍色）**、**sysrepocfg（綠色）**。
+工具的正確名稱是 `sysrepocfg`，不是 `reposyscfg`。本功能適用 Qt GUI，非舊版 Tk GUI。
+
+1. 在上方「系統SSH」填入設備的系統 SSH 位址、帳密／私鑰及 sysrepocfg 路徑，按「連線系統 SSH」。
+2. 在同一分頁右側選擇 running、candidate、startup 或 operational，按「Sysrepocfg讀取」。完整快照使用 DATA TREE 共用的「匯出XML」按鈕匯出；系統SSH分頁不再放獨立匯出按鈕。
+3. 切換左下方 **sysrepocfg**，只會替換左側 DATA TREE；右側 NETCONF XML 編輯器、預覽與所有共用按鈕維持顯示。
+4. 使用左側共用搜尋欄搜尋節點名稱、值或路徑；sysrepocfg 資料來源是唯讀，但選取、YANG 說明、右鍵新增／刪除預覽、Pretty、還原、XML 匯出、重新讀取與共用搜尋仍可操作，不顯示額外連線狀態或提示區塊。
+
+讀取透過已連線的系統 SSH 執行 `sysrepocfg --export --datastore ... --format xml --timeout ... --defaults explicit/report-all`
+（是否使用 `report-all` 由「包含 YANG default 值」控制），
+不限制 module，不執行 edit/import、sudo、commit 或 startup 儲存。系統帳號仍須具有 sysrepo 讀取權限。
+設備工具不支援某個 datastore 或參數時會顯示錯誤，不自動改用其他 datastore。
+
+若 NETCONF 已連線，且實際連線的設備位址及跳板路徑與系統 SSH 相同，會另讀一份 NETCONF 快照作比較：
+running/candidate/startup 使用對應的 `get-config`；operational 使用 NETCONF `get`（running + state）。
+Call Home 比對實際接受連線的 peer 位址，不使用 listener 位址。主機名稱別名、不同管理 IP 或不同跳板路徑
+不自動視為同一設備，顯示「未比較」。只連系統 SSH 也能正常瀏覽資料。
+
+- **紅字**：sysrepocfg 有此節點，但該次 NETCONF 快照未讀到；會依 namespace、list keys、leaf-list 值辨識 instance。
+- **灰字**：尚未比較、NETCONF 讀取失敗，或 schema/key 資訊不足、instance 不唯一而無法確認。
+- **一般文字**：NETCONF 快照也有同一節點；兩邊值不同不會被當成「讀不到」。
+
+紅字不是 NACM 拒絕的證明，也不是即時權限探測：預設值處理、operational 呈現方式及兩次讀取的時間差
+都可能造成差異。讀取結果會回報在主視窗既有狀態列；要更新比較結果請重新讀取。
+NETCONF 整次讀取失敗不會把整棵樹標成紅色。缺少 NETCONF schema 的 sysrepo-only module 仍可展開查看。
+
+切換頁籤不會覆蓋 NETCONF 編輯草稿；sysrepocfg 分頁的新增／刪除只是右側 XML 的本機預覽，
+不會因為選取紅色節點而自動送出修改。既有的 sysrepocfg 修改流程仍在 NETCONF 編輯頁。
+中斷系統 SSH 或連線另一個系統 SSH 設備時，
+會清除 sysrepocfg 樹；右側 NETCONF XML 工作區仍由 NETCONF session 控制。
+
 ## 3.6.0 系統 SSH／sysrepocfg 管理員修改
 
 ### 適用情境與連線
