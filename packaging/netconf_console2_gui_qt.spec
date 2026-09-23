@@ -3,6 +3,12 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 project_root = Path(SPECPATH).parent
+gnutls_runtime = project_root / "packaging" / "runtime" / "windows-gnutls"
+gnutls_binaries = [(str(path), ".") for path in sorted(gnutls_runtime.glob("*.dll"))]
+if not gnutls_binaries:
+    raise SystemExit(
+        "Windows GnuTLS runtime DLLs are missing from packaging/runtime/windows-gnutls"
+    )
 hiddenimports = sorted(set(sum((collect_submodules(module) for module in (
     "ncclient", "paramiko", "cryptography", "nacl", "pyang",
 )), [])))
@@ -12,7 +18,7 @@ for distribution in ("ncclient", "paramiko", "cryptography", "bcrypt", "PyNaCl",
     datas += copy_metadata(distribution)
 a = Analysis(
     [str(project_root / "packaging" / "netconf_console2_gui_qt_entry.py")],
-    pathex=[str(project_root / "ncc")], binaries=[], datas=datas,
+    pathex=[str(project_root / "ncc")], binaries=gnutls_binaries, datas=datas,
     hiddenimports=hiddenimports, hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=["unittest", "pydoc", "doctest"], noarchive=False, optimize=0,
 )

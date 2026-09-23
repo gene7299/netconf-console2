@@ -17,6 +17,7 @@ import ipaddress
 import os
 import select
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -79,6 +80,13 @@ class _Library:
         override = os.environ.get("NETCONF_CONSOLE2_GNUTLS_LIBRARY")
         if override:
             result.append(override)
+        # PyInstaller one-file bundles unpack native DLLs into ``_MEIPASS``.
+        # ctypes does not consistently search that directory on Windows, so
+        # try the absolute bundled path before falling back to system lookup.
+        bundle_dir = getattr(sys, "_MEIPASS", None)
+        if bundle_dir:
+            for filename in ("libgnutls-30.dll", "libgnutls.so.30", "libgnutls.so"):
+                result.append(str(Path(bundle_dir) / filename))
         discovered = ctypes.util.find_library("gnutls")
         if discovered:
             result.append(discovered)

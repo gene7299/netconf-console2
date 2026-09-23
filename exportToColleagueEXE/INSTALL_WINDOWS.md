@@ -2,6 +2,8 @@
 
 此資料夾是 Windows x64 單檔執行版，不包含原始碼、Python wheel、測試或建置
 腳本。同事只需 Windows 10/11；不必安裝 Python、pip 或 Python 相依套件。
+Windows EXE 已內含 TLS Call Home 所需的 GnuTLS runtime，不需要另外安裝
+MSYS2、GnuTLS 或其他 DLL。
 
 ## 獨立 GUI（3.9.1）
 

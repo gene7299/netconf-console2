@@ -5,6 +5,9 @@ notices follow verbatim. This file does not change their licenses.
 Dependency source projects include https://github.com/paramiko/paramiko,
 https://github.com/ncclient/ncclient, https://github.com/mbj4668/pyang,
 https://github.com/python/cpython and https://github.com/pyinstaller/pyinstaller.
+The Windows EXE also includes the MSYS2 UCRT64 GnuTLS 3.8.13 runtime and its
+runtime dependencies for RFC 8071 TLS Call Home.  Source and license details:
+https://www.gnutls.org/ and https://www.msys2.org/.
 The local source package installs its dependencies separately with pip.
 
 ========================================================================
