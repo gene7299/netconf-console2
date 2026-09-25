@@ -43,6 +43,7 @@ from .preferences import (CONNECTION_ACCOUNT_FIELD, PreferencesStore, change_pro
 from . import backups, events, lifecycle, raw_rpc, reconcile, safety, system_backup, templates
 from . import subscription_templates
 from .subscription_widgets import NotificationTemplatePanel
+from .software_widgets import SoftwareUpdatePage
 from .audit import AuditLog
 from .connection_diagnostics import DiagnosticRun, report_text
 from .drafts import DraftShelf, schema_fingerprint
@@ -1299,6 +1300,8 @@ class QtMainWindow(QMainWindow):
         self.workspace_tabs.addTab(self.fault_page, "Fault Management範本")
         self.netconf_template_page = self._build_netconf_template_page()
         self.workspace_tabs.addTab(self.netconf_template_page, "NETCONF Stream訂閱範本")
+        self.software_page = SoftwareUpdatePage(self, CodeEditor)
+        self.workspace_tabs.addTab(self.software_page, "Software Update")
         self.session_page = self._build_session_page()
         self.workspace_tabs.addTab(self.session_page, "Session(s)管理")
 
@@ -1787,14 +1790,18 @@ class QtMainWindow(QMainWindow):
         self.backup_create_button.setObjectName("backupCreateButton")
         self.backup_create_button.clicked.connect(self.create_system_backup)
         grid.addWidget(self.backup_create_button, 2, 1)
+        self.backup_select_restore_button = QPushButton("從遠端備份還原")
+        self.backup_select_restore_button.setObjectName("backupSelectRestoreButton")
+        self.backup_select_restore_button.clicked.connect(self.select_system_backup_to_restore)
+        grid.addWidget(self.backup_select_restore_button, 2, 2, 1, 2)
         self.backup_restore_button = QPushButton("從最新備份還原 running")
         self.backup_restore_button.setObjectName("backupRestoreButton")
         self.backup_restore_button.clicked.connect(self.restore_system_backup)
-        grid.addWidget(self.backup_restore_button, 2, 2, 1, 3)
-        self.backup_status = QLabel("尚未執行；備份使用 UTC 時間目錄，還原會自動找最新並驗證 SHA256。")
+        grid.addWidget(self.backup_restore_button, 2, 4, 1, 2)
+        self.backup_status = QLabel("尚未執行；備份使用 UTC 時間目錄，還原前會驗證 SHA256。")
         self.backup_status.setWordWrap(True)
         self.backup_status.setStyleSheet("color:#925127")
-        grid.addWidget(self.backup_status, 2, 5, 1, 5)
+        grid.addWidget(self.backup_status, 2, 6, 1, 4)
         grid.setColumnStretch(2, 2)
         grid.setColumnStretch(8, 2)
         self.tabs.addTab(page, "備份 / 還原")
@@ -3241,6 +3248,7 @@ class QtMainWindow(QMainWindow):
 
     def disconnect(self):
         if self.busy:
+            self.software_page.cancel()
             self.client.cancel.set()
             self.status_label.setText("已要求取消；等待目前 backend 操作結束…")
             return
@@ -4544,6 +4552,7 @@ class QtMainWindow(QMainWindow):
         record.status = "已連線"
         self.main_session_record = record
         self._record_session_action(record, "NETCONF session 建立", "連線成功")
+        self.software_page.new_main_session()
         return record
 
     def _record_session_action(self, record, operation, result="已送出", *, refresh=True):
@@ -6367,6 +6376,8 @@ class QtMainWindow(QMainWindow):
             return
         received = False
         for session_record in subscriptions:
+            if getattr(session_record, "software_owned", False):
+                continue
             manager = session_record.manager
             client = session_record.client
             if client is None or not client.connected or client.manager is not manager:
@@ -7117,22 +7128,117 @@ class QtMainWindow(QMainWindow):
             output = self._script_text(*result)
             return system_backup.parse_marker(output, "NCC_LATEST_BACKUP_DIR", request.base), output
         self._run("系統備份：尋找最新…", work,
-                  lambda result: self._confirm_system_restore(result, shell, settings, request))
+                  lambda result: self._confirm_system_restore(result, shell, settings, request, latest_only=True))
 
-    def _confirm_system_restore(self, result, shell, settings, request):
-        latest, output = result
+    def select_system_backup_to_restore(self):
+        if self.busy:
+            return
+        if self.client.connected and not self.demo:
+            self.status_label.setText("還原前請先中斷 NETCONF，避免停止 netopeer2-server 時留下連線結果待確認。")
+            return
+        try:
+            shell, settings = self._admin_shell_for_operation()
+            request = self._system_backup_request()
+        except Exception as exc:
+            self.show_error(exc)
+            return
+
+        def work(_progress):
+            if shell.settings != settings:
+                raise EditError("系統 SSH 設定已改變；不會列出遠端備份。")
+            result = shell.run(system_backup.shell_command(), system_backup.backups_script(request).encode("utf-8"),
+                               timeout=self._system_script_timeout())
+            output = self._script_text(*result)
+            return system_backup.parse_backup_entries(output, request.base), output
+
+        self._run("系統備份：列出遠端備份…", work,
+                  lambda result: self._select_system_restore_backup(result, shell, settings, request))
+
+    def _select_system_restore_backup(self, result, shell, settings, request):
+        entries, output = result
+        if not entries:
+            self.backup_status.setText("找不到含 running.xml 且通過 SHA256 驗證的遠端備份。")
+            QMessageBox.information(self, "沒有可還原的遠端備份",
+                                    "BASE 目錄中沒有可用備份。只會列出含 running.xml 且 SHA256 驗證成功的備份。")
+            return
+
         dialog = QDialog(self)
         self.lifecycle_dialog = dialog
-        dialog.setWindowTitle("確認還原最新 Sysrepo 備份")
+        dialog.setWindowTitle("選擇遠端 Sysrepo 備份")
+        dialog.resize(740, 460)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("遠端 BASE：%s\n選擇要還原到 running 的備份；清單中的 SHA256 已通過驗證。" % request.base))
+        backup_list = QListWidget()
+        for path, datastores in entries:
+            timestamp = path.rsplit("/", 1)[-1]
+            item = QListWidgetItem("%s    datastore：%s" % (timestamp, ", ".join(datastores)))
+            item.setData(USER_ROLE, path)
+            item.setData(int(USER_ROLE) + 1, datastores)
+            item.setToolTip(path)
+            backup_list.addItem(item)
+        backup_list.setCurrentRow(0)
+        layout.addWidget(backup_list, 1)
+        details = QPlainTextEdit()
+        details.setReadOnly(True)
+        details.setMaximumHeight(92)
+        layout.addWidget(details)
+
+        def update_details(_row):
+            item = backup_list.currentItem()
+            if item is None:
+                details.clear()
+                return
+            selected_path = item.data(USER_ROLE)
+            details.setPlainText("選擇備份：%s\n包含 datastore：%s\nSHA256：已通過" %
+                                 (selected_path, ", ".join(item.data(int(USER_ROLE) + 1))))
+
+        backup_list.currentRowChanged.connect(update_details)
+        update_details(0)
+        controls = QHBoxLayout()
+        cancel = QPushButton("取消")
+        select = QPushButton("確認選擇並繼續")
+        select.setObjectName("sysrepoButton")
+        controls.addStretch(1)
+        controls.addWidget(cancel)
+        controls.addWidget(select)
+        layout.addLayout(controls)
+
+        def close_dialog():
+            self.lifecycle_dialog = None
+            dialog.reject()
+            self._sync_controls()
+
+        def confirm_selection():
+            item = backup_list.currentItem()
+            if item is None:
+                QMessageBox.information(dialog, "選擇備份", "請先選擇一份備份。")
+                return
+            selected_path = item.data(USER_ROLE)
+            close_dialog()
+            self._confirm_system_restore((selected_path, output), shell, settings, request, latest_only=False)
+
+        cancel.clicked.connect(close_dialog)
+        select.clicked.connect(confirm_selection)
+        dialog.finished.connect(lambda _code: setattr(self, "lifecycle_dialog", None))
+        dialog.show()
+
+    def _confirm_system_restore(self, result, shell, settings, request, latest_only=True):
+        backup_dir, output = result
+        backup_label = "最新備份" if latest_only else "選擇的備份"
+        verification_note = ("執行時會再次確認仍為最新目錄與 checksum。" if latest_only
+                             else "執行時會再次確認目錄、running.xml 與 checksum。")
+        dialog = QDialog(self)
+        self.lifecycle_dialog = dialog
+        dialog.setWindowTitle("確認還原%s Sysrepo 備份" % backup_label)
         dialog.resize(1000, 650)
         layout = QVBoxLayout(dialog)
         info = QPlainTextEdit()
         info.setReadOnly(True)
-        info.setPlainText("系統 SSH：%s@%s:%s\n遠端 BASE：%s\n\n將還原最新備份：\n%s\n\n"
-                         "已先完成 SHA256 驗證；執行時會再次確認最新目錄與 checksum。\n"
-                         "會停止可能修改 Sysrepo 的服務：\n  %s\n\n最新備份檢查輸出：\n%s" %
-                         (settings.username, settings.host, settings.port, request.base, latest,
-                          "\n  ".join(system_backup.STOP_SERVICES), output[-6000:]))
+        info.setPlainText("系統 SSH：%s@%s:%s\n遠端 BASE：%s\n\n將還原%s：\n%s\n\n"
+                         "已先完成 SHA256 驗證；%s\n"
+                         "會停止可能修改 Sysrepo 的服務：\n  %s\n\n遠端備份檢查輸出：\n%s" %
+                         (settings.username, settings.host, settings.port, request.base, backup_label, backup_dir,
+                          verification_note, "\n  ".join(system_backup.STOP_SERVICES), output[-6000:]))
         layout.addWidget(info, 1)
         acknowledged = QCheckBox("我確認主機、備份版本、服務停止／重啟行為，並有系統管理授權。")
         layout.addWidget(acknowledged)
@@ -7153,9 +7259,9 @@ class QtMainWindow(QMainWindow):
                 QMessageBox.information(dialog, "確認還原", "請先核對備份版本與服務行為，並勾選確認。")
                 return
             if not shell.connected or shell.settings != self._admin_settings():
-                self.show_error(EditError("系統 SSH 已中斷或欄位已改變；請重新連線並重新尋找最新備份。"))
+                self.show_error(EditError("系統 SSH 已中斷或欄位已改變；請重新連線並重新選擇備份。"))
                 return
-            if QMessageBox.question(dialog, "送出 Sysrepo 還原", "確定停止服務並將最新備份覆寫到 running？\n還原後必須重新連線 NETCONF 並重新讀取。",
+            if QMessageBox.question(dialog, "送出 Sysrepo 還原", "確定停止服務並將此備份覆寫到 running？\n還原後必須重新連線 NETCONF 並重新讀取。",
                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                     QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
                 return
@@ -7164,7 +7270,7 @@ class QtMainWindow(QMainWindow):
             self.uncertain = True
             def work(_progress):
                 return shell.run(system_backup.shell_command(),
-                                  system_backup.restore_script(request, latest).encode("utf-8"),
+                                  system_backup.restore_script(request, backup_dir, latest_only=latest_only).encode("utf-8"),
                                   timeout=self._system_script_timeout(restore=True))
             def done(result):
                 output2 = self._script_text(*result)
@@ -7275,10 +7381,12 @@ class QtMainWindow(QMainWindow):
         self.admin_connect_button.style().unpolish(self.admin_connect_button)
         self.admin_connect_button.style().polish(self.admin_connect_button)
         backup_ready = idle and admin_online and not self.admin_requires_refresh
-        for button in (self.backup_check_button, self.backup_create_button, self.backup_restore_button):
+        for button in (self.backup_check_button, self.backup_create_button,
+                       self.backup_select_restore_button, self.backup_restore_button):
             button.setEnabled(backup_ready)
         self._sync_rpc_controls()
         self.reread_result_button.setEnabled(self.last_attempt is not None and connected and idle)
+        self.software_page.sync()
         self._sync_drafts()
 
     def load_demo(self):
@@ -7300,6 +7408,7 @@ class QtMainWindow(QMainWindow):
             return
         if self.busy or self._task_thread is not None:
             self._close_requested = True
+            self.software_page.cancel()
             self.reconnect_enabled = False
             self.reconnect_due = None
             self.client.cancel.set()
@@ -7327,6 +7436,7 @@ class QtMainWindow(QMainWindow):
         operations = {key: client.disconnect for key, client in clients.items()}
         if self.admin_connection is not None:
             operations[id(self.admin_connection)] = self.admin_connection.close
+        operations[id(self.software_page.download_source)] = self.software_page.download_source.close_local
         for record in self.session_records:
             record.watchdog_pending = False
         event.ignore()
@@ -7381,8 +7491,9 @@ def build_application():
         QPushButton#sysrepoButton { background: #b91c1c; color: white; font-weight: 700; padding: 7px 14px; }
         QPushButton#sysrepoButton:disabled { background: #d8e1ec; color: #708096; }
         QPushButton#backupCreateButton { background: #2563eb; color: white; font-weight: 700; }
+        QPushButton#backupSelectRestoreButton { background: #d97706; color: white; font-weight: 700; }
         QPushButton#backupRestoreButton { background: #b91c1c; color: white; font-weight: 700; }
-        QPushButton#backupCreateButton:disabled, QPushButton#backupRestoreButton:disabled { background: #d8e1ec; color: #708096; }
+        QPushButton#backupCreateButton:disabled, QPushButton#backupSelectRestoreButton:disabled, QPushButton#backupRestoreButton:disabled { background: #d8e1ec; color: #708096; }
         QPushButton#dangerButton, QPushButton#deleteNodeButton { background: #b91c1c; color: white; font-weight: 700; }
         QPushButton#dangerButton:disabled, QPushButton#deleteNodeButton:disabled { background: #d8e1ec; color: #708096; }
         QPushButton#warningButton { background: #b45309; color: white; font-weight: 600; }

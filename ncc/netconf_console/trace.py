@@ -10,8 +10,8 @@ from typing import TextIO
 
 
 _SECRET_TAG = re.compile(
-    r"(?is)(<(?:[\w.-]+:)?(?:password|passwd|secret|private-key|privatekey|cleartext-password)"
-    r"(?:\s[^>]*)?>)(.*?)(</(?:[\w.-]+:)?(?:password|passwd|secret|private-key|privatekey|cleartext-password)\s*>)"
+    r"(?is)(<(?:[\w.-]+:)?(?:password|passwd|secret|private-key|privatekey|cleartext-password|appl-password)"
+    r"(?:\s[^>]*)?>)(.*?)(</(?:[\w.-]+:)?(?:password|passwd|secret|private-key|privatekey|cleartext-password|appl-password)\s*>)"
 )
 _SECRET_ATTRIBUTE = re.compile(
     r"(?is)((?:password|passwd|secret|private[-_]?key)\s*=\s*[\"'])(.*?)([\"'])"

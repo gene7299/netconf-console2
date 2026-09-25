@@ -7,7 +7,8 @@ import paramiko
 from .sshauth import authenticate
 
 
-def open_jump(settings):
+def open_jump_transport(settings):
+    """Authenticate to the jump host without opening a target connection."""
     if settings.transport != "ssh" or settings.call_home:
         raise ValueError("SSH 跳板只適用 Direct SSH；不支援 TLS 或 Call Home。")
     if not settings.jump_host or not settings.jump_username or not 1 <= settings.jump_port <= 65535:
@@ -30,11 +31,20 @@ def open_jump(settings):
                      [settings.jump_key] if settings.jump_key else [],
                      settings.jump_auth in {"auto", "agent"}, False,
                      settings.jump_auth, settings.jump_passphrase)
-        channel = transport.open_channel("direct-tcpip", (settings.host, settings.port),
-                                         ("127.0.0.1", 0), timeout=settings.timeout)
-        return transport, channel
+        return transport
     except Exception:
         if transport is not None:
             transport.close()
         sock.close()
+        raise
+
+
+def open_jump(settings):
+    transport = open_jump_transport(settings)
+    try:
+        channel = transport.open_channel("direct-tcpip", (settings.host, settings.port),
+                                         ("127.0.0.1", 0), timeout=settings.timeout)
+        return transport, channel
+    except Exception:
+        transport.close()
         raise

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- Add remote Sysrepo backup selection for restoring `running`. The GUI lists
+  timestamped backups whose `running.xml` and SHA256 checksums are valid, then
+  rechecks the selected backup before applying it (Qt GUI 3.14.2).
+- Fix the Software Update page layout so its inventory, transfer and operation
+  controls, RPC preview and response tabs share one page-wide scrollbar (Qt GUI
+  3.14.1).
+- Add automatic SFTP download sources (Qt GUI 3.14.0): enumerate active local
+  interfaces or configured jump-host addresses, select files, and populate the
+  software-download URI and credentials. Serve an exact read-only file allowlist
+  with ephemeral local SSH credentials/host key, or upload through the jump
+  host's existing SFTP server into an isolated /tmp/netconf-update-* directory.
+  Preserve manual URI settings, support cancellation/progress and explicit
+  remote cleanup, maintain supervision during staging, and close local SFTP
+  with the application. Reuse jump authentication and host-key policy.
+- Compact the Software Update inventory table to its header and two visible
+  slot rows (Qt GUI 3.13.1), with scrolling for additional DUT slots and sizing
+  based on the current font, style and horizontal scrollbar.
+- Add a Software Update workspace (Qt GUI 3.13.0), based on O-RAN MP
+  v17.01 clauses 8 / 9.5 and CONF v12.00 clauses 3.1.6 / 3.1.7. Show live
+  inventory, active/running/access/build fields and per-slot file integrity.
+  Provide manual download/install/activate/reset, manifest build import,
+  multi-file download, credential forms, redacted pretty XML and five workflow
+  presets. Subscribe before changes, match asynchronous completion events,
+  honour DUT timeouts, refresh inventory during waits, and verify the target
+  running slot after reset/reconnect. Stop on failure without replaying writes.
+  Preserve automatic supervision watchdog responses during long workflows;
+  cancellation/window close stop subsequent steps and clean up the dedicated
+  managed subscription. Add appl-password to trace redaction.
 - Add a red circular unread-count badge to the Notification tab (GUI 3.12.2),
   with white numbers, 99+ overflow and exact-count tooltip. Count all subscription
   sessions, including arrivals while inactive/minimized; clear when the page is

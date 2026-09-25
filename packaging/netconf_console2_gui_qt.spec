@@ -12,7 +12,7 @@ if not gnutls_binaries:
 hiddenimports = sorted(set(sum((collect_submodules(module) for module in (
     "ncclient", "paramiko", "cryptography", "nacl", "pyang",
 )), [])))
-hiddenimports += ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets"]
+hiddenimports += ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide6.QtNetwork"]
 datas = [(str(project_root / "packaging" / "assets" / "netconf-console2.ico"), ".")]
 datas += [(str(project_root / "ncc/netconf_console/gui/assets/notification_catalog.json"),
            "netconf_console/gui/assets")]

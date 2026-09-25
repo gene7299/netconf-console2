@@ -1,9 +1,100 @@
-# NETCONF Windows GUI 操作說明（3.12.2）
+# NETCONF Windows GUI 操作說明（3.14.2）
+
+## Software Update
+
+新增「Software Update」分頁，位於 NETCONF Stream訂閱範本與 Session(s)管理之間。
+依據 MP v17.01 §8、§9.5，CONF v12.00 §3.1.6、§3.1.7，以及配套的
+`o-ran-software-management`、`o-ran-file-management`、`o-ran-operations` YANG 設計。
+
+### Inventory 與更新設定
+
+1. 建立主 NETCONF 連線，按「讀取 Software Inventory」。此頁顯示時預設每 5 秒更新；
+   更新流程等待通知期間也會嘗試讀取 inventory。失敗讀取會保留上次資料並顯示狀態。
+2. 表格顯示 slot 的 `VALID / INVALID / EMPTY`、active、running、access、build name/version/ID、
+   product、vendor。「Slot 檔案」列出各檔案版本、local-path、integrity；「Inventory XML」保留原始回應的 Pretty XML。
+   Slot 表格高度僅保留表頭及兩列；DUT 若提供更多 slots，可捲動查看。
+   `active` 表示下次開機使用，`running` 表示目前執行。未回傳的欄位顯示 `—`。
+3. 點選 READ_WRITE slot 帶入目標。Install 前會重讀並排除 active/running slot；
+   Activate 僅接受 VALID 且沒有 integrity=NOK 的 slot。READ_ONLY 是 factory slot，
+   不列入一般更新操作目標。EMPTY slot 可依 MP 的缺省 active/running 表示法選取；
+   最終仍以 DUT 的 RPC 驗證結果為準。
+4. Download 可選「自填 URI」或「選擇檔案，自動準備 SFTP／URI」。手填時每行填一個完整
+   `sftp://user@host/path/file` 或 `ftpes://user@host/path/file`。O-RU 直接連到此伺服器取檔；
+   自動模式可啟動本機 SFTP，或先將本機檔案上傳至跳板，詳見下一節。
+   UI 依 `build-content-download` 提示逐檔下載或封裝套件模式；請提供該 build 所需的全部檔案。
+5. Install 的 `file-names` 使用 manifest 內的 `fileName`，每行一筆。
+   可匯入 manifest.xml、選擇 build 並按「帶入 Build」，填入檔名與預期版本。
+   匯入不會自動選擇硬體相容性或推測伺服器路徑；請確認 product/vendor 和下載 URI。
+6. 「認證／進階」提供 password、certificate、設備既有認證，以及 FTPES appl-password。
+   可填多筆 server public keys，每行 `algorithm base64-key`；RSA 使用 YANG 定義的 DER RSAPublicKey
+   編碼，不能直接貼整行 OpenSSH 公鑰。FTPES 僅允許透過 NETCONF/TLS 下達。
+   密碼欄位遮罩、不寫入偏好設定，RPC 預覽與流程紀錄也會遮罩。
+
+### 自動準備 SFTP 下載來源
+
+1. 在 Download 選擇「選擇檔案，自動準備 SFTP／URI」，程式會依實際主 NETCONF 連線設定
+   偵測本機或跳板機 IP。尚未 NETCONF 連線時，採用畫面上的連線設定。
+2. 從「DUT 可連到的 IP」選擇網卡位址。程式列出已啟用介面的 IPv4／IPv6 位址，排除
+   loopback、link-local 等位址；能判斷往 DUT 路由的來源 IP 時會優先選取並標示。
+   這是介面／路由資訊，不是從 DUT 實測可達性；DUT 必須能路由到所選 IP 和 SFTP port。
+3. 按「選擇檔案並準備」（可多選）。準備成功後，自動填入唯讀 URI 清單、密碼及可轉換的
+   server public key，Pretty RPC 預覽也會更新。含 Download 的送出按鈕在來源準備完成後才啟用。
+4. **直連／本機模式**：只在所選 IP 啟動程式內建的臨時 SFTP。port 預設自動分配，也可指定；
+   自動產生臨時帳號、密碼、RSA host key。僅能讀取所選檔案，不提供 shell、寫入或其他目錄。
+   不修改 Windows SSH 服務或防火牆設定；若 Windows 提示存取網路，需允許 DUT 所在網路的連入。
+   狀態列顯示 DUT 讀取進度；「停止本機 SFTP」或關閉程式會停止服務。
+5. **SSH 跳板模式**：偵測跳板機的網卡 IP，而非本機 IP。使用跳板既有的 SSH/SFTP server
+   與 SSH port，沿用跳板帳號、登入密碼及 host-key 驗證設定，將檔案上傳至
+   `/tmp/netconf-update-<唯一識別碼>/`，避免覆蓋既有檔案。上傳完成並核對大小後才產生 URI。
+   供 DUT 使用的密碼也用於此次上傳認證，確認該密碼可登入跳板。
+   若原跳板連線僅用私鑰／Agent，且沒有登入密碼，畫面會顯示補填欄位；私鑰密碼不能當成登入密碼。
+6. 「停止檔案準備」會取消後續上傳，正在等待的 SSH/SFTP 動作可能需等到 timeout。
+   上傳失敗／取消時會嘗試清理本次已建立的檔案；網路中斷時可能保留暫存，畫面會列出路徑。
+   「清理此次跳板暫存」只移除本次建立的目錄與已知檔案，不遞迴刪除其他 `/tmp` 內容。
+   關閉程式時會停止本機服務；已完成的跳板暫存會保留，可在關閉前按清理，或依跳板暫存政策處理。
+7. 改變 IP、port、檔案或跳板設定後，請重新準備；舊的自動 URI 會失效並清除。
+   切回「自填 URI」會恢復先前的手填內容並停止本機 SFTP。
+   自動模式的下載認證欄位由來源管理；手動與自動更新流程皆可使用準備完成的來源。
+
+跳板需支援 SFTP，以及 `ip` 或 `hostname -I` 網卡查詢。若 negotiated host key（例如 Ed25519）
+無法以此版 O-RAN file-management 的 algorithm identity 表達，會提示未帶入 `server/keys`；
+DUT 需已有對應的伺服器信任設定。檔名與帳號中的特殊字元會自動進行 URI 編碼。
+
+實作使用 [Paramiko SFTP server/client API](https://docs.paramiko.org/en/stable/api/sftp.html)
+與 [Qt 網卡列舉 API](https://doc.qt.io/qtforpython-6/PySide6/QtNetwork/QNetworkInterface.html)。
+
+### 手動與自動流程
+
+- 手動：Software Download、Software Install、Software Activate、Reset O-RU。
+  Download 會依序處理輸入的全部 URI；Install/Activate 操作目前選定的目標 slot。
+  Reset 使用 `<reset xmlns="urn:o-ran:operations:1.0"/>`，會重新啟動設備。
+- 自動：可選 Download → Install → Activate → Reset，或停在 Install／Activate；
+  也有「已下載」及「已安裝」起點。含 Reset 的開始按鈕會明確標示。
+- 所有 Download/Install/Activate 都先建立獨立 Software Update 通知 session，
+  訂閱 NETCONF stream 下的 download-event、install-event、activation-event。
+  RPC 回覆 STARTED 後，必須收到符合檔案／slot 的 COMPLETED 才會繼續。
+  該 session 在 Session(s)管理留下建立時間、用途與紀錄，流程結束時自動清理；
+  通知也會出現在 Notification 分頁並計入未讀數。
+- Install／Activate 完成後再次讀取 inventory。Activate 不會切換 running；
+  選擇 Reset 才會重連並確認 VALID、active=true、running=true、目標 slot 與版本，
+  並參考設備斷線、restart-datetime／restart-cause 等重啟資訊。
+  Call Home 模式沿用原本監聽設定，DUT 必須能建立額外通知連線與重啟後的回連。
+- 優先使用 DUT 回覆的通知 timeout。Download/Activate 省略時依 YANG 使用 30 秒；
+  Install 未提供時使用「Install 備用等待時間」（預設 600 秒）。Reset 後重連預設最多 300 秒。
+- 失敗、逾時或結果不確定時停止後續步驟，不會自動重送任何更新／Reset RPC。
+  「停止後續步驟」與關閉視窗會取消後續流程；正在等待的 RPC 仍需返回或 timeout，
+  已送到 DUT 的操作可能繼續執行。請重新讀取 inventory 確認。
+- 長流程期間，原先勾選的自動 supervision watchdog reset 仍會處理既有訂閱。
+  Reset 會中斷設備 sessions；更新後原有的一般訂閱需要重新建立。
+  主 session 重建後，請重新載入 Schema／資料，再進行 DATA TREE 編輯。
+
+下方提供會隨欄位更新的 Pretty RPC 預覽、最後 RPC 回應、最後完成通知、流程紀錄，
+以及複製遮罩 XML。自動流程預覽列出主要更新 RPC；專用訂閱與 inventory RPC 可由預覽選單查看。
 
 ## 自訂 RPC、Create Subscription 與 Notification
 
 Qt 主工作區分頁順序為「資料/XML」、「RPC」、「Subscription」、「Notification」、
-「Measurement範本」、「Fault Management範本」、「NETCONF Stream訂閱範本」及「Session(s)管理」。
+「Measurement範本」、「Fault Management範本」、「NETCONF Stream訂閱範本」、「Software Update」及「Session(s)管理」。
 
 ### 快速建立範本訂閱
 
@@ -1004,6 +1095,13 @@ sysrepocfg --copy-from="$LATEST/running.xml" --datastore=running --format=xml
 還原前後都不會自動重送 XML、commit 或保存 startup。還原成功或結果不明後，GUI 會要求重新
 連線 NETCONF 並重新讀取 running；若最新備份在確認後被另一個備份取代，工具會停止而不套用。
 這些按鈕不提供任意 shell、`sudo`、`docker exec` 或 NACM 自動放行，請只對已獲授權的 RU 使用。
+
+### 從指定遠端備份還原 running
+
+按「從遠端備份還原」會列出 BASE 中含 `running.xml` 且 SHA256 驗證成功的備份，並顯示時間與所含 datastore。
+選擇備份後按「確認選擇並繼續」，核對主機、備份路徑及服務操作，再勾選授權並確認還原。
+真正還原前會重新檢查所選目錄、`running.xml` 與 SHA256；即使後來新增了更新的備份，仍會使用你選定的版本。
+還原範圍仍只有 `running`；服務停止／恢復順序與上述最新備份流程相同。
 
 ## 測試與建置
 

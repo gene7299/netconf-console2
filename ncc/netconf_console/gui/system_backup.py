@@ -186,11 +186,54 @@ def latest_script(request):
     ))
 
 
+def backups_script(request):
+    """List timestamped backups with a running XML and valid checksums."""
+    request = prepare(request.base, request.sysrepocfg, request.sysrepoctl,
+                      request.init_module, request.datastores)
+    base = _q(request.base)
+    return "\n".join((
+        "set -eu",
+        "BASE=%s" % base,
+        "if [ ! -d \"$BASE\" ]; then printf 'NCC_BACKUP_NOT_FOUND=%s\\n' \"$BASE\" >&2; exit 21; fi",
+        "find \"$BASE\" -mindepth 1 -maxdepth 1 -type d -name '20??????-??????*' -print | sort -r | while IFS= read -r DIR; do",
+        "  [ -f \"$DIR/running.xml\" ] && [ -f \"$DIR/SHA256SUMS\" ] || continue",
+        "  if ! (cd \"$DIR\" && sha256sum -c SHA256SUMS >/dev/null 2>&1); then continue; fi",
+        "  stores=''",
+        "  for datastore in running candidate startup; do",
+        "    if [ -f \"$DIR/$datastore.xml\" ]; then stores=\"$stores,$datastore\"; fi",
+        "  done",
+        "  printf 'NCC_BACKUP_ENTRY=%s|%s\\n' \"$DIR\" \"${stores#,}\"",
+        "done",
+        "",
+    ))
+
+
+def parse_backup_entries(raw, base):
+    """Parse and validate the remote backup list emitted by backups_script."""
+    text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+    entries = []
+    for line in text.splitlines():
+        if not line.startswith("NCC_BACKUP_ENTRY="):
+            continue
+        value = line.partition("=")[2]
+        path, separator, stores_text = value.partition("|")
+        if not separator:
+            raise EditError("遠端備份清單格式不合法。")
+        path = _validate_backup_dir(path, base)
+        stores = tuple(store for store in stores_text.split(",") if store)
+        if (not stores or stores[0] != "running"
+                or not set(stores).issubset(set(DATASTORES))
+                or len(stores) != len(set(stores))):
+            raise EditError("遠端備份清單包含不支援的 datastore。")
+        entries.append((path, stores))
+    return tuple(entries)
+
+
 def _validate_backup_dir(path, base):
     base = validate_base(base)
     path = str(path or "").strip().rstrip("/")
     if not path.startswith(base + "/"):
-        raise EditError("遠端最新備份不在設定的 BASE 目錄內。")
+        raise EditError("遠端備份不在設定的 BASE 目錄內。")
     leaf = path[len(base) + 1:]
     if "/" in leaf or not _STAMP.fullmatch(leaf):
         # A collision suffix is numeric and still retains the timestamp.
@@ -211,8 +254,8 @@ def parse_marker(raw, marker, base):
     return _validate_backup_dir(marker_value(raw, marker), base)
 
 
-def restore_script(request, expected_dir):
-    """Verify the previewed newest backup, restore running, and recover services."""
+def restore_script(request, expected_dir, latest_only=True):
+    """Verify the selected backup, restore running, and recover services."""
     request = prepare(request.base, request.sysrepocfg, request.sysrepoctl,
                       request.init_module, request.datastores)
     expected = _validate_backup_dir(expected_dir, request.base)
@@ -223,15 +266,20 @@ def restore_script(request, expected_dir):
         "umask 077",
         "BASE=%s" % base,
         "EXPECTED=%s" % expected,
-        "LATEST=$(find \"$BASE\" -mindepth 1 -maxdepth 1 -type d -name '20??????-??????*' -print | sort | tail -n 1)",
-        "if [ -z \"$LATEST\" ] || [ \"$LATEST\" != \"$EXPECTED\" ]; then",
-        "  printf 'NCC_LATEST_CHANGED=%s\\n' \"$LATEST\" >&2; exit 23",
+    ]
+    if latest_only:
+        lines += [
+            "LATEST=$(find \"$BASE\" -mindepth 1 -maxdepth 1 -type d -name '20??????-??????*' -print | sort | tail -n 1)",
+            "if [ -z \"$LATEST\" ] || [ \"$LATEST\" != \"$EXPECTED\" ]; then",
+            "  printf 'NCC_LATEST_CHANGED=%s\\n' \"$LATEST\" >&2; exit 23",
+            "fi",
+        ]
+    lines += [
+        "if [ ! -d \"$EXPECTED\" ] || [ ! -f \"$EXPECTED/running.xml\" ] || [ ! -f \"$EXPECTED/SHA256SUMS\" ]; then",
+        "  printf 'NCC_BACKUP_INCOMPLETE=%s\\n' \"$EXPECTED\" >&2; exit 22",
         "fi",
-        "if [ ! -f \"$LATEST/running.xml\" ] || [ ! -f \"$LATEST/SHA256SUMS\" ]; then",
-        "  printf 'NCC_BACKUP_INCOMPLETE=%s\\n' \"$LATEST\" >&2; exit 22",
-        "fi",
-        "if ! (cd \"$LATEST\" && sha256sum -c SHA256SUMS); then",
-        "  printf 'NCC_CHECKSUM_FAILED=%s\\n' \"$LATEST\" >&2; exit 24",
+        "if ! (cd \"$EXPECTED\" && sha256sum -c SHA256SUMS); then",
+        "  printf 'NCC_CHECKSUM_FAILED=%s\\n' \"$EXPECTED\" >&2; exit 24",
         "fi",
         "active=''",
         "failures=''",
@@ -259,11 +307,11 @@ def restore_script(request, expected_dir):
     for service in STOP_SERVICES:
         lines.append("stop_one %s || exit 30" % _q(service))
     lines += [
-        "if ! %s --copy-from=\"$LATEST/running.xml\" --datastore=running --format=xml; then" % _q(request.sysrepocfg),
-        "  printf 'NCC_RESTORE_FAILED=%s\\n' \"$LATEST\" >&2; exit 31",
+        "if ! %s --copy-from=\"$EXPECTED/running.xml\" --datastore=running --format=xml; then" % _q(request.sysrepocfg),
+        "  printf 'NCC_RESTORE_FAILED=%s\\n' \"$EXPECTED\" >&2; exit 31",
         "fi",
-        "printf 'NCC_RESTORE_APPLIED=%s\\n' \"$LATEST\"",
-        "printf 'NCC_RESTORE_APPLIED=%s\\n' \"$LATEST\" >&2",
+        "printf 'NCC_RESTORE_APPLIED=%s\\n' \"$EXPECTED\"",
+        "printf 'NCC_RESTORE_APPLIED=%s\\n' \"$EXPECTED\" >&2",
         "exit 0",
         "",
     ]
