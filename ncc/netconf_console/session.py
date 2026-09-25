@@ -12,6 +12,7 @@ import logging
 import os
 import socket
 import ssl
+import struct
 import threading
 import time
 from dataclasses import dataclass, replace
@@ -27,6 +28,31 @@ from .trace import TraceSink
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _enable_tcp_keepalive(sock: socket.socket, idle_seconds: int | None) -> None:
+    """Enable OS TCP probes so idle direct and Call Home links survive NATs."""
+    if not idle_seconds or idle_seconds < 0:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        probe_interval = max(1, min(10, int(idle_seconds)))
+        if os.name == "nt" and hasattr(sock, "ioctl"):
+            ioctl_code = getattr(socket, "SIO_KEEPALIVE_VALS", 0x98000004)
+            sock.ioctl(ioctl_code, struct.pack(
+                "=III", 1, int(idle_seconds) * 1000, probe_interval * 1000))
+            return
+        for option_name, value in (
+                ("TCP_KEEPIDLE", int(idle_seconds)),
+                ("TCP_KEEPINTVL", probe_interval),
+                ("TCP_KEEPCNT", 3)):
+            option = getattr(socket, option_name, None)
+            if option is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
+    except (AttributeError, OSError, OverflowError, struct.error):
+        # Keepalive tuning is best-effort; it must never block a valid NETCONF
+        # connection on platforms with different socket options.
+        LOGGER.debug("Could not configure TCP keepalive", exc_info=True)
 
 
 def _phase(session, name, state, detail=""):
@@ -158,7 +184,19 @@ class TracedSSHSession(transport.SSHSession):
 
     def close(self) -> None:
         try:
-            super().close()
+            if getattr(self, "_console_fast_close", False):
+                # ncclient's SSH close joins its reader in an unbounded loop.
+                # Closing the transport/channel already wakes that daemon
+                # reader; GUI shutdown must not wait for the join loop.
+                self._closing.set()
+                self._connected = False
+                if self._transport is not None:
+                    self._transport.close()
+                if self._channel is not None:
+                    self._channel.close()
+                    self._channel = None
+            else:
+                super().close()
         finally:
             jump = getattr(self, "_console_jump", None)
             if jump is not None:
@@ -269,6 +307,7 @@ class TracedTLSSession(transport.TLSSession):
         server_name = settings.tls_server_name or host
         wrapped = None
         try:
+            _enable_tcp_keepalive(sock, settings.keepalive)
             _phase(self, "auth", "start")
             backend = str(settings.tls_backend or "auto").lower()
             if backend not in {"auto", "openssl", "gnutls"}:
@@ -349,7 +388,18 @@ class TracedTLSSession(transport.TLSSession):
         self._connected = False
         if sock is not None:
             try:
-                sock.close()
+                if getattr(self, "_console_fast_close", False):
+                    from .gnutls import GnuTLSSocket
+                    if isinstance(sock, GnuTLSSocket):
+                        sock.close(abort=True)
+                    else:
+                        try:
+                            sock.shutdown(socket.SHUT_RDWR)
+                        except OSError:
+                            pass
+                        sock.close()
+                else:
+                    sock.close()
             except OSError:
                 pass
             self._socket = None
@@ -507,6 +557,7 @@ def open_direct(
                 phase("tcp", "start")
                 owned_socket = socket.create_connection((settings.host, settings.port), timeout=settings.timeout,
                     source_address=(settings.bind, 0) if settings.bind else None)
+                _enable_tcp_keepalive(owned_socket, settings.keepalive)
                 jump_options["sock"] = owned_socket
                 phase("tcp", "done", str(owned_socket.getpeername()))
             if phase:
@@ -599,6 +650,7 @@ def open_call_home(
         if phase:
             phase("tcp", "done", peer_address)
         accepted.settimeout(settings.timeout if settings.timeout else None)
+        _enable_tcp_keepalive(accepted, settings.keepalive)
 
     handler = _handler_for(settings)
     session = None
@@ -784,21 +836,34 @@ class ConsoleContext:
             self.namespace_registry.select_server(self._namespace_server_key())
         return self.namespace_registry.learn_schema(text, module_hint)
 
-    def disconnect(self) -> None:
-        if self.manager is not None:
-            try:
-                self.manager.close_session()
-            except Exception:
-                try:
-                    self.manager._session.close()
-                except Exception:
-                    pass
+    def disconnect(self, graceful_timeout: float | None = None) -> None:
+        manager_obj = self.manager
+        if manager_obj is not None:
             self.manager = None
+            must_close_transport = graceful_timeout is not None
+            try:
+                if graceful_timeout is not None:
+                    previous_timeout = manager_obj.timeout
+                    manager_obj.timeout = max(0.1, min(
+                        float(previous_timeout) if previous_timeout is not None else graceful_timeout,
+                        graceful_timeout))
+                    manager_obj._session._console_fast_close = True
+                manager_obj.close_session()
+            except Exception:
+                must_close_transport = True
+            finally:
+                if must_close_transport:
+                    try:
+                        manager_obj._session.close()
+                    except Exception:
+                        LOGGER.debug("Transport cleanup failed", exc_info=True)
 
-    def close(self) -> None:
-        self.disconnect()
-        if self.trace:
-            self.trace.close()
+    def close(self, graceful_timeout: float | None = None) -> None:
+        try:
+            self.disconnect(graceful_timeout=graceful_timeout)
+        finally:
+            if self.trace:
+                self.trace.close()
 
     def status_lines(self) -> list[str]:
         if self.metadata is None or self.manager is None:

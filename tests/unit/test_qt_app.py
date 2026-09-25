@@ -394,7 +394,11 @@ class QtWorkspaceTests(unittest.TestCase):
             ["NETCONF連線", "SSH 認證", "TLS 憑證", "進階",
              "SSH 認證方式 / 私鑰密碼", "SSH 跳板", "系統SSH", "備份 / 還原"],
         )
-        self.assertEqual(self.window.output_tabs.count(), 6)
+        self.assertEqual(self.window.output_tabs.count(), 5)
+        self.assertEqual([self.window.workspace_tabs.tabText(i)
+                          for i in range(self.window.workspace_tabs.count())],
+                         ["資料/XML", "RPC", "Subscription", "Notification",
+                          "Measurement範本", "Fault Management範本", "NETCONF Stream訂閱範本", "Session(s)管理"])
         self.assertEqual(self.window.source_box.currentText(), "running")
         self.assertFalse(self.window.checks["show_candidates"].isChecked())
         self.assertEqual(self.window.tree.indentation(), 18)

@@ -21,9 +21,9 @@ if (Test-Path -LiteralPath $legacyAlias -PathType Leaf) {
 }
 Push-Location $projectRoot
 try {
-    & py -3 -B -m unittest discover -s tests/unit -p "test_qt_app.py" -v
+    & uv run --python 3.13 --group test --extra gui -- python -B -m unittest discover -s tests/unit -p "test_qt_app.py" -v
     if ($LASTEXITCODE -ne 0) { throw "PySide6 GUI unit tests failed." }
-    & py -3 -B -m PyInstaller --noconfirm --clean --distpath $OutputDirectory `
+    & uv run --python 3.13 --group build --extra gui -- python -m PyInstaller --noconfirm --clean --distpath $OutputDirectory `
         --workpath (Join-Path $WorkDirectory "pyinstaller") `
         (Join-Path $PSScriptRoot "netconf_console2_gui_qt.spec")
     if ($LASTEXITCODE -ne 0) { throw "PySide6 GUI executable build failed." }

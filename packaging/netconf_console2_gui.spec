@@ -7,6 +7,8 @@ hiddenimports = sorted(set(sum((collect_submodules(module) for module in (
     "ncclient", "paramiko", "cryptography", "nacl", "pyang",
 )), [])))
 datas = [(str(project_root / "packaging" / "assets" / "netconf-console2.ico"), ".")]
+datas += [(str(project_root / "ncc/netconf_console/gui/assets/notification_catalog.json"),
+           "netconf_console/gui/assets")]
 for distribution in ("ncclient", "paramiko", "cryptography", "bcrypt", "PyNaCl", "lxml", "pyang"):
     datas += copy_metadata(distribution)
 a = Analysis(

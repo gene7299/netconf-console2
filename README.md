@@ -215,6 +215,20 @@ The aliases `user-rpc`, `subscribe`, `notifications`, `watch`, `namespace`, `aut
 
 ## Native Windows GUI
 
+The Qt workspace has dedicated **RPC**, **Subscription**, and **Notification** tabs. The RPC editor
+accepts an operation or a complete envelope, previews the actual request, preserves
+an explicit message-id, and pretty-prints replies and RPC errors. Templates include
+RFC 5277 subscriptions, O-RAN alarm queries, and a manual supervision watchdog reset.
+The Subscription tab exposes the four standard O-RAN streams, inline subtree/replay
+settings, an MP v17.01 11-group/59-object performance-measurement template, and DUT discovery for
+stream and measurement capabilities. The Notification tab provides always-visible
+category, event, severity, and text filters with per-category colours, clearing, and export.
+Custom create-subscription RPCs also start notification reception.
+Subscriptions are session-bound and are not automatically restored after reconnecting.
+O-RAN supervision requires repeated watchdog resets; the supplied template sends
+one reset; an opt-in Subscription-tab checkbox sends it on each supervision notification
+when the server advertises `:interleave`. See [the GUI guide](GUI_GUIDE_ZH_TW.md).
+
 Version 3.3.0 adds a separate `exportToColleagueEXE/netconf-console2-gui.exe`.
 The CLI remains independent. GUI 3.9.1 includes manageable connection/account history
 and current-user Windows DPAPI storage, including passwords and last-used fields. Each
@@ -442,3 +456,10 @@ wsl.exe -d Ubuntu-22.04 -- bash -lc "printf 'help\\nquit\\n' | netopeer2-cli"
 
 Detailed architecture notes, protocol references, and manual O-RU checklists
 are kept outside the source tree in `../nectconf-client_backup_reference/docs`.
+
+The Qt GUI also includes YANG-derived Fault Management and NETCONF Stream subscription templates,
+with enum/boolean value choices, MP 11.3 OR filters, 34 notification types, and pretty RPC previews.
+Template pages include search, selected-only views, readable scope summaries, undo for preset/bulk
+changes, XML copy, and direct live subscription through a dedicated session. Empty Measurement
+selections cannot be sent; subscribing to all measurements requires an explicit checkbox.
+See [the GUI guide](GUI_GUIDE_ZH_TW.md) for spec references and DUT capability limits.

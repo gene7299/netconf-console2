@@ -1,4 +1,189 @@
-# NETCONF Windows GUI 操作說明（3.9.1）
+# NETCONF Windows GUI 操作說明（3.12.2）
+
+## 自訂 RPC、Create Subscription 與 Notification
+
+Qt 主工作區分頁順序為「資料/XML」、「RPC」、「Subscription」、「Notification」、
+「Measurement範本」、「Fault Management範本」、「NETCONF Stream訂閱範本」及「Session(s)管理」。
+
+### 快速建立範本訂閱
+
+1. 在對應範本分頁選一個範例，按「載入範例」，再調整要收到的通知和值。
+2. 清單上方可搜尋通知、欄位或可選值，也可只看已選項目。搜尋只改變顯示，
+   不會取消隱藏項目的勾選；下方摘要會列出實際訂閱範圍。
+3. 檢查白話摘要及 Pretty XML。載入範例或清除條件後，可按「復原」回到前一次設定；
+   Measurement 的全選及「只選 DUT」也能復原。此按鈕保留一次批次操作前的設定。
+4. 連線後可在範本頁直接按「送出Create Subscription」，以獨立 session 建立即時訂閱，
+   自動切至 Subscription 查看回應。無連線、條件無效或作業執行中時，送出按鈕停用並顯示原因。
+5. 若要設定 Replay，先按「帶入 Subscription（先不送出）」再填起訖時間。
+   範本頁直接送出會清除 Subscription 上次的起訖時間，與範本的即時訂閱預覽一致。
+
+視窗較小時，Fault / NETCONF 範本內容可捲動，底部的複製、帶入及送出按鈕保持可見。
+
+「複製 RPC XML」可複製完整預覽；其中 `message-id=preview` 是預覽標記，
+從範本頁送出時會自動產生新 ID。這些操作不會自動啟用 DUT 的量測物件。
+
+### 送出 RPC
+
+1. 完成 NETCONF 連線，切換至「RPC」。
+2. 貼上 operation XML 或完整 `<rpc>`，也可載入 UTF-8 XML 檔。
+   範本包含 get、get-config、active-alarm-list、O-RAN 訂閱與 supervision-watchdog-reset。
+3. 按「預覽 RPC」檢查完整送出內容，再按「送出 RPC」。完整 envelope 的 `message-id`
+   會保留；operation 或缺少 ID 的 envelope 會自動產生 ID。每次只送一個 operation。
+4. 下方顯示自動 Pretty 化的 RPC 回應或 rpc-error；XML 使用者內容不會寫入操作紀錄。
+   自訂 RPC 可以修改設備，送出後應重新讀取 DATA TREE 確認狀態。
+
+RPC 編輯器支援 `nc:operation`；不受 DATA TREE 草稿編輯器的輸入限制。
+XML 上限 2 MiB，不接受 DTD/entity。離線 Demo 可編輯／預覽，不連線發送。
+
+連線設定的「等待秒數」只用於連線建立與握手，「RPC timeout」只限制單次 RPC 等待時間，兩者都不是 session 壽命。
+Advanced 頁的 Session keepalive 預設每 30 秒保活（SSH 使用 SSH keepalive，TLS 使用 TCP keepalive；設為 0 可關閉）。
+「斷線後自動重連」預設開啟；重新連線後 GUI 會重新讀取設備狀態，並要求先確認資料再送修改，不會自動重送 RPC。
+網路中斷、設備重啟、設備端 idle/session policy 或認證狀態改變仍可能讓 session 中斷；這些情況只能自動恢復連線，不能保證 session 永不斷線。
+
+### 建立 Subscription
+
+「Subscription」分頁提供四個 O-RAN event streams：
+
+| Event Stream | 用途 | 典型 Notification |
+| --- | --- | --- |
+| `NETCONF` | 預設、通用事件流 | 所有允許的 YANG notifications |
+| `fault-management` | Fault Management（依 DUT 支援選用 `o-ran-fm` 或 `NETCONF`） | `alarm-notif` |
+| `measurement-result-stats` | Performance Measurement（依 DUT 支援選用 PM stream 或 `NETCONF`） | `measurement-result-stats` |
+| `supervision-notification` | M-Plane connectivity supervision（依 DUT 支援選用 supervision stream 或 `NETCONF`） | `supervision-notification` |
+
+事件流清單固定顯示四列，點選表格任一列會更新 Stream 與預設 filter；也可直接從上方
+Stream 下拉選擇。點選表格不會自動展開條件或預覽。Subscription 條件與 RPC 預覽預設收合，點選區塊標題即可展開；展開條件後可設定
+subtree filter、startTime、stopTime。頁面會即時顯示唯讀的 Create Subscription RPC 預覽；按紫色
+「送出Create Subscription」後，回應顯示在頁面下方。該按鈕位於自動 supervision 勾選框左側。
+回放前按「偵測 DUT 支援」確認 stream 的 Replay 狀態。建立訂閱會另開 NETCONF session。
+
+「Session(s)管理」分頁顯示每個 session 的 ID、建立時間、用途、狀態、stream 和發送紀錄，也能獨立中斷。
+
+「全部中斷」會同時關閉所有 NETCONF sessions，並停止自動重連。每條 `close-session`
+最多等待 1.5 秒回覆，逾時即清理底層 SSH／TLS 及該 session 的跳板連線；
+等待時間不再逐條累加，畫面顯示已完成的數量。底層資源清理仍需少量時間。
+
+按視窗 X 也會自動清理主 session、所有訂閱 sessions 及系統 SSH，完成後關閉程式，
+不必先按「全部中斷」。若正在全部中斷時按 X，會在完成後自動關閉；
+一般 RPC 正在執行時，則等該次作業結束再清理，該次 RPC 仍適用原本的 RPC timeout。
+等待 Call Home 或載入 schema 時會要求取消。草稿保存流程仍會先執行。
+
+### Fault Management 可選值範本
+
+範本根據 MP v17.01 §11.3（p.109–110）、Annex A 與 `o-ran-fm.yang`：
+
+- `fault-severity`：CRITICAL、MAJOR、MINOR、WARNING 可複選。
+- `is-cleared`：true / false。WARNING 不使用此欄位，若希望包含 WARNING 請不要加清除條件。
+- `alarm-type`：YANG 定義的 10 種 enum，可展開逐項勾選。
+- `fault-id`：展開可勾選 Annex A 的 41 種共通告警；也可輸入 uint16，廠商 ID 範圍 1000..65535。
+- source、fault-text、event-time、affected-objects 等欄位可輸入精確值，型別、length、range 與說明在表格顯示。
+- 「偵測 DUT Fault Management 支援」會讀取 streams、目前告警值，並比對已載入的 DUT YANG。
+  實際 fault-id / fault-source 等值加入可編輯的選單；沒有出現的告警不等於不支援。
+
+同一欄位的多個值會建立並列 notification 分支（OR），同層不同欄位依 subtree content-match
+規則一起比對。沒有設定值的欄位不限制，不會建立空的欄位節點來取代值過濾。
+例如 CRITICAL + MAJOR 會產生兩個 `alarm-notif`，各有自己的 `fault-severity`。
+無條件範本使用 `<alarm-notif/>`。最多 128 個分支；超過時需縮小條件。
+範本下方即時顯示摘要與 Pretty XML，可複製 XML、先帶入 Subscription，或直接送出建立訂閱。
+
+### NETCONF Stream 訂閱範本
+
+新增分頁預載配套 YANG 的 34 種 notification，可勾選多種事件，點選事件後在右側選擇值。
+依 YANG 解析 enum、boolean、typedef 與可解析的 leafref；未解析的外部型別顯示原型別並保留文字輸入。
+「偵測 DUT Stream / 比對已載入 YANG」會以取得的 DUT schema 更新欄位和值。
+YANG 有定義不等於 DUT 已啟用，還需符合 feature、權限及 stream 支援。
+
+內建範例：
+
+- MP §11.3 Case 1：CRITICAL / MAJOR / MINOR 告警 + 完整 transceiver 群組 + RX_ON_TIME。
+- MP §11.3 Case 2：NETCONF 全部通知（不帶 filter）。
+- MP §8：download-event / install-event / activation-event；§8.5 的下載失敗狀態。
+- MP §9.1.8：TX / RX carrier state changes，state 可選 DISABLED、BUSY、READY。
+- MP §13.1：同步、PTP、SyncE、GNSS 通知，狀態值依各自 YANG，並非共用一套 enum。
+- CONF §3.1.14.3：EPE POWER。該 PDF p.74 的 `measurement-result-statistics` 與 YANG 不一致；
+  本工具採 YANG 的 `measurement-result-stats`。
+
+只有「全部通知」勾選時會省略 filter；未勾選任何事件時禁止帶入，避免意外訂閱全部。
+文字條件為精確比對；不支援以 wildcard 或 substring 取代 subtree 的內容比對。
+
+### Measurement 與 EPE 設定範本
+
+Measurement 更新為 v17.01 的 11 groups / 59 個現行 objects：transceiver 16、rx-window 12、
+TX 2、shared-cell 2、EPE 4、symbol RSSI 2、TSSI 1、RSSI 1、TX antenna 1、TX output power 1、Ethernet 17。
+舊拼字 `TX_POPWER` 是 deprecated，不重複計入；DUT 若仍回報它，會以額外項目提供選取。
+
+「偵測 DUT 可用項目」讀取 `performance-measurement-objects/measurement-capabilitites`，
+可用「只選 DUT 回報項目」帶入，額外的 DUT object 也可勾選。未回報不代表一定不支援。
+預設提供 CONF EPE POWER 範例，另有 MP §11.3 群組範例、RX 時序範例及全部量測。
+未勾選任何 object 時禁止送出，需明確勾選「接收全部 Measurement 通知」才會訂閱全部。
+XML 與選取摘要即時更新，可搜尋 group / object 或只看已選，分頁內可直接帶入 Subscription 或送出。
+
+EPE 設定可選 POWER、TEMPERATURE、VOLTAGE、CURRENT；report-info 可複選
+AVERAGE、MAXIMUM、MINIMUM、FREQUENCY_TABLE。選 FREQUENCY_TABLE 後需填 bin-count、
+lower-bound、upper-bound；bin-count 必須小於 DUT 回報的 max-bin-count。
+Object unit 可選 O-RAN radio / PA / FPGA、power-supply、fan、cpu 等 class，DUT 必須實際具備該 class。
+偵測會顯示每個 EPE object 的 report-info、component-class 與 max-bin-count。
+「同時設定 notification-interval」可選擇性加入上報週期（不同於 measurement-interval）。
+
+按「產生 edit-config 範本並切換至 RPC」只載入 RPC 編輯器，檢查後自行送出。
+依 MP §10.2，measurement object 預設 inactive，需先啟用與設定 interval；訂閱本身不會啟動量測。
+
+### 接收與篩選 Notification
+
+也可從 RPC 編輯器送出完整 `create-subscription`（例如包含多個 subtree 或 XPath filter）；
+送出後會啟動相同的接收流程。Notification 分頁顯示設備送來的通知，頁面上方直接提供
+分類、Notification 名稱、嚴重度與全文搜尋，不需另開選單。事件依軟體管理、載波狀態、
+M-Plane 控制、Fault Management、Performance Measurement、Supervision、同步等類型分色。
+此頁支援清除與匯出，保留最近 100 筆，每筆顯示上限 256 KiB。清除只清除本機畫面。
+
+收到未讀通知時，Notification 分頁標籤右上角會覆蓋紅色圓形、白字數量徽章。
+所有訂閱 session 的新通知會累加；超過 99 筆顯示 `99+`，滑鼠停留可看完整未讀數。
+切到前景中的 Notification 分頁即標為已讀、隱藏徽章；清除通知也會歸零。
+在該分頁前景閱讀時，新通知直接視為已讀；程式在背景或最小化時仍累加。
+未讀數是自上次閱讀後的累計新通知數，通知內容仍只保留最近 100 筆。
+
+每個 RFC 5277 訂閱使用獨立 NETCONF session；主 session 可繼續執行一般 RPC，不受訂閱阻塞。
+RFC 5277 不提供通用 unsubscribe RPC，因此請在「Session(s)管理」分頁對目標 session 按「中斷」。
+斷線／重連後需重新訂閱。設備若未宣告 `:interleave`，自動 watchdog reset 無法在該 supervision
+訂閱 session 上送出，GUI 會顯示狀態。
+訂閱逾時時保留「結果待確認」狀態並繼續接收，避免重複建立可能已成功的訂閱。
+收到 `notificationComplete` 後可重新訂閱；`replayComplete` 表示回放結束，仍繼續即時接收。
+
+在 Subscription 分頁勾選「收到 supervision-notification 時自動送 supervision-watchdog-reset」，會在每個
+supervision 訂閱 session 收到 notification 後，由該 session 送出 O-RAN watchdog reset；使用範本預設的
+60 秒通知間隔、10 秒 guard overhead。此功能只在設備宣告 `:interleave` 時可用；未宣告時畫面會說明限制。
+自動送出失敗時不會跳出
+打斷操作的視窗，會顯示狀態，並於下一筆 supervision notification 到達時再試。預設不勾選。
+勾選狀態會隨 GUI 設定保存；重新啟動後仍須重新連線並建立訂閱。
+
+### O-RAN 規範中的發送方向
+
+依專案 `spec/O-RAN.WG4.TS.MP.0-R004-v17.01.pdf` §6.7（p.51–54）、
+§11.2–11.3（p.108–110）：Client 送 RPC／create-subscription，O-RU 回 RPC reply
+並發送 Notification。`NETCONF` stream 訂閱所有允許的通知；可以用 filter 限定 alarm-notif。
+alarm-notif 通知告警的新增／清除；目前全部告警應以 get 讀取 active-alarm-list。
+
+訂閱 supervision-notification 後，具有相應權限的 Client 須持續送
+supervision-watchdog-reset。勾選 Subscription 分頁的自動執行後，GUI 會在每次收到
+supervision-notification 時送出 reset；預設 notification interval 是 60 秒、guard overhead 是
+10 秒，超過 supervision timer 可能觸發設備的監管失聯處理。取消勾選時可在 RPC 分頁手動
+送出 watchdog reset 範本；只看告警時可使用 alarm-notif 訂閱範本。
+
+在實機測試中，DUT 未公告名為 `measurement-result-stats` 的 stream；使用該 stream 名稱時回覆
+`Failed to collect modules to subscribe to.`。以設備公告的 `NETCONF` stream（或 PM stream）搭配相同
+measurement filter 則成功回覆 `<ok/>`。因此 GUI 會偵測並映射到 DUT 公告的 stream，必要時回退到
+`NETCONF`，同時保留 payload filter。
+
+CONF v12 §3.1.14.3（PDF p.73–75）正是 EPE 訂閱測試：先以 `edit-config` 設定 EPE POWER、
+`report-info=Average`、`object-unit=O-RAN-RADIO`、60 秒 interval、`active=true`，取得成功回覆後再
+建立 EPE POWER filter 的 subscription，確認週期通知，最後停用 measurement。該版測試範例的
+notification 節點叫 `measurement-result-statistics`；本工具依 MP v17.01 YANG 使用
+`measurement-result-stats`。兩版名稱不同，請依 DUT 公告的 YANG model/revision 選擇 payload。
+
+`spec/O-RAN.WG4.TS.CONF.0-R004-v12.00.pdf` §3.1.2.1（p.31–32）、
+§3.1.3.1（p.32–33）定義訂閱與 supervision 測試流程。§3.1.5.1（p.35–37）
+要求透過同步訊號故障，或廠商維護工具／debug command 觸發測試告警，再由 O-RU 發送通知；
+它沒有定義通用的 Client「發送 Notification」RPC。
 
 ## PySide6 GUI
 
@@ -9,7 +194,7 @@ YANG schema、DATA TREE、自由 XML 編輯、Pretty、節點新增／刪除、N
 系統 SSH/sysrepocfg、備份／還原、通知、草稿與診斷。建置方式為：
 
 ```powershell
-py -3 -m pip install ".[gui]" PyInstaller
+uv run --python 3.13 --group build --extra gui -- python -m PyInstaller --version
 .\packaging\build-windows-gui-qt.ps1
 ```
 
@@ -296,7 +481,7 @@ IP/port，Windows 防火牆也必須允許該 port；GUI 不會自動更改防�
 ### 收合連線區與自動重連
 
 上下排之間按「▲ 隱藏連線設定」可騰出 XML 顯示空間，再按「▼ 顯示連線設定」
-恢復；收合狀態也會保存。旁邊的「斷線後自動重連」預設不勾選，勾選狀態會保存。
+恢復；收合狀態也會保存。旁邊的「斷線後自動重連」預設勾選，勾選狀態會保存。
 
 - 首次連線需手動操作。成功連線後若 transport 回報斷線，依序等待 2、4、8、16、
   30 秒重試，之後每次最多等待 30 秒（另加每次連線／握手 timeout）。
@@ -551,10 +736,8 @@ range、length、pattern、must／when 與 typedef 限制。完整 YANG 語意�
 `%USERPROFILE%\.netconf-console2\gui-operations.json`；demo／自我測試不寫個人紀錄。
 不保存 XML、leaf 值、登入密碼或私鑰密碼；仍含端點資訊。它是操作摘要，不是完整 wire trace。
 
-「事件通知」輸入 stream 名稱（預設 NETCONF），按「開始訂閱」使用目前 session 的
-RFC 5277 create-subscription。需 server 宣告 `:notification:`；stream 名稱由設備提供。
-若沒有 `:interleave:`，確認訂閱後會停用其他讀写 RPC，避免違反 session 限制。
-「停止（中斷連線）」會確認後關閉 session（RFC 5277 沒有通用 unsubscribe RPC）。
+Qt GUI 的事件接收與管理請使用上方「Subscription」分頁：每筆 RFC 5277 訂閱使用獨立 session，
+可在 Session 表格查看建立資訊及紀錄並獨立中斷，不會阻塞主要 NETCONF session 的 RPC。
 四種連線方式均使用同一機制；斷線及自動重連後不會自動重訂閱。
 通知僅留記憶體最近 100 筆，每筆最多 65536 字元，過長標示截斷；可另行匯出文字檔。
 只遮蔽常見 password／secret／private-key 欄位，其他自訂敏感資料須自行檢查再分享。
@@ -650,6 +833,39 @@ replayComplete 只表示歷史部分播完，不代表即時訂閱停止。
 將滑鼠停在主要停用按鈕上會顯示原因。設定操作選單也標示缺少 capability、
 未連線、草稿未處理、結果待確認、訂閱限制或限時提交進行中。
 「設定操作 → 查看功能停用原因」可一次查看狀態。不會为了啟用按鈕而繞過安全檢查。
+
+## Qt GUI：NETCONF / sysrepocfg DATA TREE 切換
+
+左側 DATA TREE 下方新增彩色頁籤：**NETCONF（藍色）**、**sysrepocfg（綠色）**。
+工具的正確名稱是 `sysrepocfg`，不是 `reposyscfg`。本功能適用 Qt GUI，非舊版 Tk GUI。
+
+1. 在上方「系統SSH」填入設備的系統 SSH 位址、帳密／私鑰及 sysrepocfg 路徑，按「連線系統 SSH」。
+2. 在同一分頁右側選擇 running、candidate、startup 或 operational，按「Sysrepocfg讀取」。完整快照使用 DATA TREE 共用的「匯出XML」按鈕匯出；系統SSH分頁不再放獨立匯出按鈕。
+3. 切換左下方 **sysrepocfg**，只會替換左側 DATA TREE；右側 NETCONF XML 編輯器、預覽與所有共用按鈕維持顯示。
+4. 使用左側共用搜尋欄搜尋節點名稱、值或路徑；sysrepocfg 資料來源是唯讀，但選取、YANG 說明、右鍵新增／刪除預覽、Pretty、還原、XML 匯出、重新讀取與共用搜尋仍可操作，不顯示額外連線狀態或提示區塊。
+
+讀取透過已連線的系統 SSH 執行 `sysrepocfg --export --datastore ... --format xml --timeout ... --defaults explicit/report-all`
+（是否使用 `report-all` 由「包含 YANG default 值」控制），
+不限制 module，不執行 edit/import、sudo、commit 或 startup 儲存。系統帳號仍須具有 sysrepo 讀取權限。
+設備工具不支援某個 datastore 或參數時會顯示錯誤，不自動改用其他 datastore。
+
+若 NETCONF 已連線，且實際連線的設備位址及跳板路徑與系統 SSH 相同，會另讀一份 NETCONF 快照作比較：
+running/candidate/startup 使用對應的 `get-config`；operational 使用 NETCONF `get`（running + state）。
+Call Home 比對實際接受連線的 peer 位址，不使用 listener 位址。主機名稱別名、不同管理 IP 或不同跳板路徑
+不自動視為同一設備，顯示「未比較」。只連系統 SSH 也能正常瀏覽資料。
+
+- **紅字**：sysrepocfg 有此節點，但該次 NETCONF 快照未讀到；會依 namespace、list keys、leaf-list 值辨識 instance。
+- **灰字**：尚未比較、NETCONF 讀取失敗，或 schema/key 資訊不足、instance 不唯一而無法確認。
+- **一般文字**：NETCONF 快照也有同一節點；兩邊值不同不會被當成「讀不到」。
+
+紅字不是 NACM 拒絕的證明，也不是即時權限探測：預設值處理、operational 呈現方式及兩次讀取的時間差
+都可能造成差異。讀取結果會回報在主視窗既有狀態列；要更新比較結果請重新讀取。
+NETCONF 整次讀取失敗不會把整棵樹標成紅色。缺少 NETCONF schema 的 sysrepo-only module 仍可展開查看。
+
+切換頁籤不會覆蓋 NETCONF 編輯草稿；sysrepocfg 分頁的新增／刪除只是右側 XML 的本機預覽，
+不會因為選取紅色節點而自動送出修改。既有的 sysrepocfg 修改流程仍在 NETCONF 編輯頁。
+中斷系統 SSH 或連線另一個系統 SSH 設備時，
+會清除 sysrepocfg 樹；右側 NETCONF XML 工作區仍由 NETCONF session 控制。
 
 ## 3.6.0 系統 SSH／sysrepocfg 管理員修改
 

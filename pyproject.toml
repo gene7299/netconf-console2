@@ -44,7 +44,7 @@ include-package-data = true
 where = ["ncc"]
 
 [tool.setuptools.package-data]
-"netconf_console.gui" = ["assets/*.ico"]
+"netconf_console.gui" = ["assets/*.ico", "assets/*.json"]
 
 [tool.uv]
 package = true

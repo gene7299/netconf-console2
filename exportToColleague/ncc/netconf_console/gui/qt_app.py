@@ -97,8 +97,25 @@ class QCheckBox(_TranslatedTextMixin, _QtCheckBox):
     pass
 
 
-class QGroupBox(_TranslatedTextMixin, _QtGroupBox):
-    pass
+class QGroupBox(_QtGroupBox):
+    """Translate a group-box title while retaining its source string."""
+
+    def __init__(self, *args, **kwargs):
+        source = args[0] if args and isinstance(args[0], str) else None
+        if source is not None:
+            args = args[1:]
+        super().__init__(*args, **kwargs)
+        self._ncc_source_title = source
+        if source is not None:
+            self.setTitle(source)
+
+    def setTitle(self, title):  # noqa: N802 - Qt API name
+        self._ncc_source_title = "" if title is None else str(title)
+        super().setTitle(tr(self._ncc_source_title))
+
+    def _ncc_retranslate(self):
+        if hasattr(self, "_ncc_source_title"):
+            super().setTitle(tr(self._ncc_source_title))
 
 
 class _TranslatedWindowMixin:

@@ -1,0 +1,207 @@
+[
+  {
+    "id": 1,
+    "name": "Unit temperature is high",
+    "page": 248
+  },
+  {
+    "id": 2,
+    "name": "Unit dangerously overheating",
+    "page": 248
+  },
+  {
+    "id": 3,
+    "name": "Ambient temperature violation",
+    "page": 248
+  },
+  {
+    "id": 4,
+    "name": "Temperature too low",
+    "page": 249
+  },
+  {
+    "id": 5,
+    "name": "Cooling fan broken",
+    "page": 249
+  },
+  {
+    "id": 6,
+    "name": "No fan detected",
+    "page": 249
+  },
+  {
+    "id": 7,
+    "name": "Tuning failure",
+    "page": 249
+  },
+  {
+    "id": 8,
+    "name": "Filter unit faulty",
+    "page": 249
+  },
+  {
+    "id": 9,
+    "name": "Transmission quality deteriorated",
+    "page": 249
+  },
+  {
+    "id": 10,
+    "name": "RF Module overvoltage protection faulty",
+    "page": 249
+  },
+  {
+    "id": 11,
+    "name": "Configuring failed",
+    "page": 250
+  },
+  {
+    "id": 12,
+    "name": "Critical file not found",
+    "page": 250
+  },
+  {
+    "id": 13,
+    "name": "File not found",
+    "page": 250
+  },
+  {
+    "id": 14,
+    "name": "Configuration file corrupted",
+    "page": 250
+  },
+  {
+    "id": 15,
+    "name": "Unit out of order",
+    "page": 250
+  },
+  {
+    "id": 16,
+    "name": "Unit unidentified",
+    "page": 250
+  },
+  {
+    "id": 17,
+    "name": "No external sync source",
+    "page": 250
+  },
+  {
+    "id": 18,
+    "name": "Synchronisation Error",
+    "page": 250
+  },
+  {
+    "id": 19,
+    "name": "TX out of order",
+    "page": 250
+  },
+  {
+    "id": 20,
+    "name": "RX out of order",
+    "page": 251
+  },
+  {
+    "id": 21,
+    "name": "Increased BER detected on the optical connection",
+    "page": 251
+  },
+  {
+    "id": 22,
+    "name": "Post-test failed",
+    "page": 251
+  },
+  {
+    "id": 23,
+    "name": "FPGA SW update failed",
+    "page": 251
+  },
+  {
+    "id": 24,
+    "name": "Unit blocked",
+    "page": 251
+  },
+  {
+    "id": 25,
+    "name": "Reset Requested",
+    "page": 251
+  },
+  {
+    "id": 26,
+    "name": "Power Supply Faulty",
+    "page": 251
+  },
+  {
+    "id": 27,
+    "name": "Power Amplifier faulty",
+    "page": 252
+  },
+  {
+    "id": 28,
+    "name": "C/U-plane logical Connection faulty",
+    "page": 252
+  },
+  {
+    "id": 29,
+    "name": "Transceiver Fault",
+    "page": 252
+  },
+  {
+    "id": 30,
+    "name": "Interface Fault",
+    "page": 252
+  },
+  {
+    "id": 31,
+    "name": "Unexpected C/U-plane message content fault",
+    "page": 253
+  },
+  {
+    "id": 32,
+    "name": "Triggering failure of antenna calibration",
+    "page": 253
+  },
+  {
+    "id": 33,
+    "name": "Dying Gasp",
+    "page": 253
+  },
+  {
+    "id": 34,
+    "name": "Clock source failure",
+    "page": 253
+  },
+  {
+    "id": 35,
+    "name": "Lost O-DU ID based Supervision",
+    "page": 253
+  },
+  {
+    "id": 36,
+    "name": "Rx Signal quality deteriorated",
+    "page": 254
+  },
+  {
+    "id": 37,
+    "name": "High IQ Power",
+    "page": 254
+  },
+  {
+    "id": 38,
+    "name": "VSWR high",
+    "page": 254
+  },
+  {
+    "id": 39,
+    "name": "Certificate About to Expire",
+    "page": 254
+  },
+  {
+    "id": 40,
+    "name": "Certificate Expired",
+    "page": 255
+  },
+  {
+    "id": 41,
+    "name": "Generic Hardware Failure",
+    "page": 255
+  }
+]

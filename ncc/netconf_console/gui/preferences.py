@@ -14,7 +14,8 @@ MAGIC = b"NCCGUI-DPAPI\x01"
 LINUX_KEY_FILENAME = "gui-settings.key"
 SSH_FIELDS = ("username", "password", "ssh_key", "allow_agent", "look_for_keys", "ssh_auth", "key_passphrase")
 CONNECTION_ACCOUNT_FIELD = "account_name"
-VIEW_FIELDS = {"source", "defaults", "state", "wrap_xml", "connection_hidden", "auto_reconnect", "show_candidates", "rollback_on_error"}
+VIEW_FIELDS = {"source", "defaults", "state", "wrap_xml", "connection_hidden", "auto_reconnect",
+               "auto_supervision_reset", "show_candidates", "rollback_on_error"}
 
 
 class PreferencesError(ValueError):

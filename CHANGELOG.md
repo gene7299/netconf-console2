@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- Add a red circular unread-count badge to the Notification tab (GUI 3.12.2),
+  with white numbers, 99+ overflow and exact-count tooltip. Count all subscription
+  sessions, including arrivals while inactive/minimized; clear when the page is
+  viewed in the foreground or notifications are cleared.
+- Speed up GUI disconnect-all and window shutdown (3.12.1): close independent
+  sessions concurrently, cap close-session reply waits at 1.5 seconds, and
+  release SSH/TLS transports without ncclient's unbounded SSH reader join.
+  Keep Qt responsive, show cleanup progress, and finish queued window closure
+  automatically after an active operation/disconnect completes. Window shutdown
+  also closes the main session, subscription sessions, jump transports and system SSH.
+- Improve subscription template usability (Qt GUI 3.12.0): searchable lists,
+  selected-only views that preserve hidden choices, readable scope summaries,
+  one-step undo for preset/bulk changes, copy RPC XML, and direct live subscription
+  through dedicated sessions. Explain disabled send actions inline. Require an
+  explicit all-measurements choice instead of treating an empty selection as all.
+- Add MP v17.01 / YANG value-driven FM and NETCONF Stream templates with
+  severity, boolean and enum selections, typed input, active-alarm suggestions,
+  41 Annex A fault IDs, and live pretty RPC previews. Implement sibling subtree
+  branches for OR filters and the mixed alarm/measurement example in MP 11.3.
+- Expand Measurement to 11 groups / 59 current objects and include DUT-only
+  values. Add EPE report-info multi-selection, histogram parameters, optional
+  notification interval, and per-object capability hints.
+- Package the offline YANG catalogue with the Qt GUI (3.11.0).
+
+
+- Add separate Subscription and Notification workspaces. Subscription exposes
+  the four O-RAN event streams, inline filter/replay fields, the requested
+  7-group/37-object performance-measurement template, and live DUT discovery
+  of RFC 5277 streams and O-RAN measurement capabilities.
+- Classify and colour O-RAN notifications in an always-visible table with
+  category, event, severity and text filters. Pretty-print custom RPC replies.
+- Give every RFC 5277 subscription its own managed NETCONF session, with a
+  creation time, purpose, sent-operation history and independent disconnect.
+  Add EPE measurement edit-config templates and optional per-session automatic
+  supervision watchdog resets. Subscription replies remain visible in the
+  Subscription page; the RPC editor preview follows edits automatically.
 - Add bottom colour-coded NETCONF/sysrepocfg DATA TREE tabs to the Qt GUI.
   The tabs switch only the left tree; the NETCONF XML workspace and controls
   remain visible. Datastore selection and `Sysrepocfg讀取` live in the System

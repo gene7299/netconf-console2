@@ -24,6 +24,8 @@ hiddenimports += [
 ]
 
 datas = [(str(project_root / "packaging" / "assets" / "netconf-console2.ico"), ".")]
+datas += [(str(project_root / "ncc/netconf_console/gui/assets/notification_catalog.json"),
+           "netconf_console/gui/assets")]
 for distribution in (
     "ncclient",
     "paramiko",

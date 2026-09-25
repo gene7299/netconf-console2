@@ -135,10 +135,13 @@ class GuiClient:
             raise
 
     def disconnect(self):
-        if self.context is not None:
-            self.context.close()
+        context = self.context
+        try:
+            if context is not None:
+                context.close(graceful_timeout=1.5)
+        finally:
             self.context = None
-        self.schema = SchemaIndex(complete=False)
+            self.schema = SchemaIndex(complete=False)
 
     def load_schema(self, directory="", force=False, progress=lambda _text: None):
         self.schema = load_device_schemas(

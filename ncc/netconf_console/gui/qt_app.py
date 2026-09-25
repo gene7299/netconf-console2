@@ -16,8 +16,11 @@ import sys
 import time
 from collections import deque
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
+import uuid
 
 from lxml import etree
 
@@ -26,6 +29,8 @@ from ..trace import redact_secrets
 from ..xmloutput import serialize_xml
 from . import VERSION
 from .client import GuiClient, ReadOptions, Snapshot
+from .disconnect import DisconnectBatch
+from .notification_badge import NotificationTabBar
 from .creation import (Candidate, Template, append_template, candidates, choice_label,
                        missing_choice_candidates, new_root_selection, scalar_input,
                        suggested_values, validate_subtree)
@@ -35,7 +40,9 @@ from .model import (EditError, Selection, build_plan, children, identity, local,
 from .preferences import (CONNECTION_ACCOUNT_FIELD, PreferencesStore, change_profiles,
                           empty_book, encrypted_storage_scope, remember_account,
                           remember_connection)
-from . import backups, events, lifecycle, reconcile, safety, system_backup, templates
+from . import backups, events, lifecycle, raw_rpc, reconcile, safety, system_backup, templates
+from . import subscription_templates
+from .subscription_widgets import NotificationTemplatePanel
 from .audit import AuditLog
 from .connection_diagnostics import DiagnosticRun, report_text
 from .drafts import DraftShelf, schema_fingerprint
@@ -60,7 +67,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit as _QtPlainTextEdit, QInputDialog as _QtInputDialog,
     QMenu as _QtMenu, QProgressBar, QPushButton as _QtPushButton, QScrollArea,
     QSizePolicy, QSplitter, QStatusBar, QTabWidget as _QtTabWidget,
-    QTextEdit as _QtTextEdit, QTreeWidget as _QtTreeWidget, QTreeWidgetItem,
+    QTextEdit as _QtTextEdit, QTreeWidget as _QtTreeWidget, QTreeWidgetItem, QSpinBox,
     QVBoxLayout, QWidget,
 )
 
@@ -98,8 +105,25 @@ class QCheckBox(_TranslatedTextMixin, _QtCheckBox):
     pass
 
 
-class QGroupBox(_TranslatedTextMixin, _QtGroupBox):
-    pass
+class QGroupBox(_QtGroupBox):
+    """Translate a group-box title while retaining its source string."""
+
+    def __init__(self, *args, **kwargs):
+        source = args[0] if args and isinstance(args[0], str) else None
+        if source is not None:
+            args = args[1:]
+        super().__init__(*args, **kwargs)
+        self._ncc_source_title = source
+        if source is not None:
+            self.setTitle(source)
+
+    def setTitle(self, title):  # noqa: N802 - Qt API name
+        self._ncc_source_title = "" if title is None else str(title)
+        super().setTitle(tr(self._ncc_source_title))
+
+    def _ncc_retranslate(self):
+        if hasattr(self, "_ncc_source_title"):
+            super().setTitle(tr(self._ncc_source_title))
 
 
 class _TranslatedWindowMixin:
@@ -1046,6 +1070,22 @@ class ProfileDialog(QDialog):
             self._refresh()
 
 
+@dataclass
+class ManagedSession:
+    session_id: str
+    purpose: str
+    created_at: datetime
+    main: bool = False
+    server_id: str = ""
+    client: GuiClient | None = None
+    manager: object | None = None
+    stream: str = ""
+    status: str = "連線中"
+    last_sent: str = "尚無發送"
+    sent_records: deque = field(default_factory=lambda: deque(maxlen=30))
+    watchdog_pending: bool = False
+
+
 class QtMainWindow(QMainWindow):
     """Responsive PySide6 XML workspace."""
 
@@ -1063,6 +1103,14 @@ class QtMainWindow(QMainWindow):
         self.preferences_store = PreferencesStore() if persist else None
         self.demo = False
         self.closed = False
+        self._close_requested = False
+        self._shutdown_in_progress = False
+        self._shutdown_complete = False
+        self._disconnect_batch = None
+        self._disconnect_done = None
+        self._disconnect_timer = QTimer(self)
+        self._disconnect_timer.setInterval(40)
+        self._disconnect_timer.timeout.connect(self._poll_disconnect_batch)
         self.busy = False
         self.job_name = ""
         self.snapshot: Snapshot | None = None
@@ -1086,7 +1134,14 @@ class QtMainWindow(QMainWindow):
         self.admin_requires_refresh = False
         self.last_sent_xml = ""
         self.notification_manager = None
+        self.session_records: list[ManagedSession] = []
+        self.main_session_record: ManagedSession | None = None
+        self.session_sequence = 0
+        self.watchdog_pending_sessions = set()
+        self.raw_rpc_plan = None
+        self.watchdog_pending = False
         self.notifications = deque(maxlen=100)
+        self.notification_unread_count = 0
         self.streams = {}
         self.event_filter_xml = ""
         self.event_start = ""
@@ -1218,13 +1273,34 @@ class QtMainWindow(QMainWindow):
         workspace = QSplitter(Qt.Orientation.Horizontal)
         workspace.setChildrenCollapsible(False)
         workspace.setHandleWidth(5)
-        outer.addWidget(workspace, 1)
+        self.workspace_tabs = QTabWidget()
+        self.notification_tab_bar = NotificationTabBar()
+        self.workspace_tabs.setTabBar(self.notification_tab_bar)
+        self.workspace_tabs.setDocumentMode(True)
+        self.workspace_tabs.addTab(workspace, "資料/XML")
+        outer.addWidget(self.workspace_tabs, 1)
         workspace.addWidget(self._build_tree_panel())
         self.xml_panel = self._build_xml_panel()
         workspace.addWidget(self.xml_panel)
         workspace.setStretchFactor(0, 4)
         workspace.setStretchFactor(1, 6)
         workspace.setSizes([620, 930])
+        self.rpc_page = self._build_rpc_page()
+        self.workspace_tabs.addTab(self.rpc_page, "RPC")
+        self.subscription_page = self._build_subscription_page()
+        self.workspace_tabs.addTab(self.subscription_page, "Subscription")
+        self.event_page = self._build_event_page()
+        self.workspace_tabs.addTab(self.event_page, "Notification")
+        self._update_notification_badge()
+        self.workspace_tabs.currentChanged.connect(self._mark_notifications_read)
+        self.measurement_page = self._build_measurement_page()
+        self.workspace_tabs.addTab(self.measurement_page, "Measurement範本")
+        self.fault_page = self._build_fault_page()
+        self.workspace_tabs.addTab(self.fault_page, "Fault Management範本")
+        self.netconf_template_page = self._build_netconf_template_page()
+        self.workspace_tabs.addTab(self.netconf_template_page, "NETCONF Stream訂閱範本")
+        self.session_page = self._build_session_page()
+        self.workspace_tabs.addTab(self.session_page, "Session(s)管理")
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -1393,8 +1469,10 @@ class QtMainWindow(QMainWindow):
         self.fields["listen_port"] = self._line(grid, "listen_port", 1, 4)
         grid.addWidget(QLabel("等待秒數"), 1, 5)
         self.fields["timeout"] = self._line(grid, "timeout", 1, 6)
+        self.fields["timeout"].setToolTip("只限制建立連線與握手的等待時間，不限制連線存活時間。")
         grid.addWidget(QLabel("RPC timeout"), 1, 7)
         self.fields["rpc_timeout"] = self._line(grid, "rpc_timeout", 1, 8)
+        self.fields["rpc_timeout"].setToolTip("只限制單次 RPC 等待回應的時間，不限制連線存活時間。")
         self.disconnect_button = QPushButton("中斷 / 取消等待")
         self.disconnect_button.setObjectName("warningButton")
         self.disconnect_button.clicked.connect(self.disconnect)
@@ -1549,6 +1627,11 @@ class QtMainWindow(QMainWindow):
         self.import_settings_button = QPushButton("匯入設定…")
         self.import_settings_button.clicked.connect(self.import_profiles)
         grid.addWidget(self.import_settings_button, 2, 4)
+        grid.addWidget(QLabel("Session keepalive（秒；0 關閉）"), 2, 5)
+        self.fields["keepalive"] = self._line(grid, "keepalive", 2, 6)
+        self.fields["keepalive"].setMaximumWidth(80)
+        self.fields["keepalive"].setToolTip(
+            "SSH 會定期送 SSH keepalive；TLS 會設定 TCP keepalive。此設定有助避免閒置連線被中間網路設備清除。")
         grid.setColumnStretch(3, 2)
         grid.setColumnStretch(9, 1)
         self.tabs.addTab(page, "進階")
@@ -1930,8 +2013,6 @@ class QtMainWindow(QMainWindow):
         audit_layout.addLayout(audit_bar)
         audit_layout.addWidget(self.audit_pane, 1)
         self.output_tabs.addTab(audit_page, "操作紀錄")
-        self.event_page = self._build_event_page()
-        self.output_tabs.addTab(self.event_page, "事件通知")
         self.result_frame = self._build_result_page()
         self.output_tabs.addTab(self.result_frame, "送出結果核對")
         output_layout.addWidget(self.output_tabs, 1)
@@ -1939,30 +2020,551 @@ class QtMainWindow(QMainWindow):
         upper.setSizes([560, 360])
         return panel
 
+    def _build_rpc_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        bar = QHBoxLayout()
+        bar.addWidget(QLabel("RPC 範本"))
+        self.rpc_template = QComboBox()
+        self.rpc_template.addItems(list(raw_rpc.TEMPLATES))
+        bar.addWidget(self.rpc_template, 1)
+        self.rpc_template_button = QPushButton("帶入範本")
+        self.rpc_template_button.clicked.connect(self.load_rpc_template)
+        bar.addWidget(self.rpc_template_button)
+        self.rpc_load_button = QPushButton("載入 XML…")
+        self.rpc_load_button.clicked.connect(self.load_rpc_file)
+        bar.addWidget(self.rpc_load_button)
+        self.rpc_save_button = QPushButton("儲存 XML…")
+        self.rpc_save_button.clicked.connect(self.save_rpc_file)
+        bar.addWidget(self.rpc_save_button)
+        self.rpc_pretty_button = QPushButton("Pretty")
+        self.rpc_pretty_button.clicked.connect(self.pretty_rpc)
+        bar.addWidget(self.rpc_pretty_button)
+        layout.addLayout(bar)
+        hint = QLabel("輸入 operation 或完整 rpc；完整 rpc 的 message-id 會保留，缺少時自動產生。按送出會直接執行 XML。")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.rpc_hint = QLabel("O-RAN supervision 訂閱需持續送 watchdog reset；此頁範本只執行一次。")
+        self.rpc_hint.setWordWrap(True)
+        layout.addWidget(self.rpc_hint)
+        split = QSplitter(Qt.Orientation.Vertical)
+        self.rpc_editor = CodeEditor()
+        self.rpc_editor.setFont(QFont("Consolas", 11))
+        self.rpc_editor.setPlainText(raw_rpc.TEMPLATES["get"])
+        self.rpc_highlighter = XmlHighlighter(self.rpc_editor)
+        self.rpc_editor.textChanged.connect(self._rpc_editor_changed)
+        self.rpc_template.currentTextChanged.connect(self.load_rpc_template)
+        split.addWidget(self.rpc_editor)
+        result = QWidget()
+        result_layout = QVBoxLayout(result)
+        result_layout.setContentsMargins(0, 0, 0, 0)
+        send_bar = QHBoxLayout()
+        self.rpc_preview_button = QPushButton("預覽 RPC")
+        self.rpc_preview_button.clicked.connect(self.preview_rpc)
+        send_bar.addWidget(self.rpc_preview_button)
+        self.rpc_send_button = QPushButton("送出 RPC")
+        self.rpc_send_button.clicked.connect(self.send_rpc)
+        send_bar.addWidget(self.rpc_send_button)
+        self.rpc_status = QLabel("尚未送出 RPC。")
+        self.rpc_status.setWordWrap(True)
+        send_bar.addWidget(self.rpc_status, 1)
+        result_layout.addLayout(send_bar)
+        self.rpc_output_tabs = QTabWidget()
+        self.rpc_preview = self._output_edit()
+        self.rpc_reply = self._output_edit()
+        self.rpc_output_tabs.addTab(self.rpc_preview, "待送出 RPC（唯讀）")
+        self.rpc_output_tabs.addTab(self.rpc_reply, "最後 RPC 回應")
+        result_layout.addWidget(self.rpc_output_tabs)
+        split.addWidget(result)
+        split.setSizes([350, 300])
+        layout.addWidget(split, 1)
+        self._rpc_editor_changed()
+        return page
+
+    def _build_subscription_page(self):
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        self.subscription_scroll = QScrollArea()
+        self.subscription_scroll.setWidgetResizable(True)
+        self.subscription_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        self.subscription_layout = layout
+        self.subscription_scroll.setWidget(content)
+        page_layout.addWidget(self.subscription_scroll)
+
+        bar = QHBoxLayout()
+        bar.addWidget(QLabel("Stream"))
+        self.stream_box = QComboBox()
+        self.stream_box.setEditable(True)
+        self.stream_box.addItems(list(events.STANDARD_STREAMS))
+        bar.addWidget(self.stream_box, 1)
+        self.detect_streams_button = QPushButton("偵測 DUT 支援")
+        self.detect_streams_button.clicked.connect(self.detect_subscription_support)
+        bar.addWidget(self.detect_streams_button)
+        layout.addLayout(bar)
+
+        self.notification_status = QLabel("每筆訂閱會建立獨立 NETCONF session；請至 Session(s)管理分頁管理或中斷。")
+        self.notification_status.setWordWrap(True)
+        self.notification_status.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        layout.addWidget(self.notification_status)
+
+        self.stream_catalog = QTreeWidget()
+        self.stream_catalog.setHeaderLabels(["Event Stream", "用途", "典型 Notification", "DUT 支援", "Replay 支援"])
+        self.stream_catalog.headerItem().setToolTip(
+            4, "支援時可用 startTime / stopTime 重播 DUT 已記錄的歷史 Notification。")
+        self.stream_catalog.setRootIsDecorated(False)
+        self.stream_catalog.setAlternatingRowColors(True)
+        self.stream_catalog.setColumnWidth(0, 225)
+        self.stream_catalog.setColumnWidth(1, 240)
+        self.stream_catalog.setColumnWidth(2, 290)
+        self.stream_catalog_rows = {}
+        for name, (purpose, payload) in events.STANDARD_STREAMS.items():
+            item = QTreeWidgetItem(self.stream_catalog, [name, tr(purpose), payload, tr("尚未偵測"), "-"])
+            item.setData(0, USER_ROLE, name)
+            self.stream_catalog_rows[name] = item
+        self.stream_catalog.setCurrentItem(self.stream_catalog.topLevelItem(0))
+        row_height = max(18, self.stream_catalog.sizeHintForRow(0))
+        header_height = self.stream_catalog.header().sizeHint().height()
+        self.stream_catalog.setFixedHeight(
+            header_height + 4 * row_height + 2 * self.stream_catalog.frameWidth() + 4)
+        layout.addWidget(self.stream_catalog)
+
+        conditions = QGroupBox("Subscription 條件")
+        conditions.setCheckable(True)
+        conditions.setChecked(False)
+        conditions_section_layout = QVBoxLayout(conditions)
+        self.subscription_conditions_body = QWidget(conditions)
+        condition_layout = QVBoxLayout(self.subscription_conditions_body)
+        replay = QGridLayout()
+        replay.addWidget(QLabel("startTime（選用）"), 0, 0)
+        self.event_start_edit = QLineEdit(self.event_start)
+        replay.addWidget(self.event_start_edit, 0, 1)
+        replay.addWidget(QLabel("stopTime（選用）"), 1, 0)
+        self.event_stop_edit = QLineEdit(self.event_stop)
+        replay.addWidget(self.event_stop_edit, 1, 1)
+        replay.setColumnStretch(1, 1)
+        condition_layout.addLayout(replay)
+        condition_layout.addWidget(QLabel("Subtree filter XML（選用；填 notification payload，不要包 filter／rpc）"))
+        self.event_filter_editor = CodeEditor()
+        self.event_filter_editor.setPlaceholderText(
+            '<measurement-result-stats xmlns="urn:o-ran:performance-management:1.0"/>')
+        self.event_filter_editor.setMinimumHeight(145)
+        condition_layout.addWidget(self.event_filter_editor, 1)
+        filter_bar = QHBoxLayout()
+        clear_filter = QPushButton("清除 Filter")
+        clear_filter.clicked.connect(lambda: self.event_filter_editor.clear())
+        filter_bar.addWidget(clear_filter)
+        self.measurement_template_button = QPushButton("帶入 Measurement 範本")
+        self.measurement_template_button.clicked.connect(self.apply_measurement_template)
+        filter_bar.addWidget(self.measurement_template_button)
+        filter_bar.addStretch(1)
+        condition_layout.addLayout(filter_bar)
+        conditions_section_layout.addWidget(self.subscription_conditions_body)
+        self._set_subscription_section_expanded(
+            conditions, self.subscription_conditions_body, conditions.isChecked())
+        conditions.toggled.connect(
+            lambda expanded: self._set_subscription_section_expanded(
+                conditions, self.subscription_conditions_body, expanded))
+        self.subscription_conditions_group = conditions
+        layout.addWidget(conditions)
+
+        preview_group = QGroupBox("Create Subscription RPC 內容預覽（唯讀）")
+        preview_group.setCheckable(True)
+        preview_group.setChecked(False)
+        preview_section_layout = QVBoxLayout(preview_group)
+        self.subscription_preview_body = QWidget(preview_group)
+        preview_layout = QVBoxLayout(self.subscription_preview_body)
+        self.subscription_preview_status = QLabel("內容會依目前 Stream、filter 與回放時間自動更新。")
+        self.subscription_preview_status.setWordWrap(True)
+        preview_layout.addWidget(self.subscription_preview_status)
+        self.subscription_rpc_preview = self._output_edit()
+        self.subscription_rpc_preview.setMinimumHeight(105)
+        self.subscription_rpc_preview.setMaximumHeight(180)
+        preview_layout.addWidget(self.subscription_rpc_preview)
+        preview_section_layout.addWidget(self.subscription_preview_body)
+        self._set_subscription_section_expanded(
+            preview_group, self.subscription_preview_body, preview_group.isChecked())
+        preview_group.toggled.connect(
+            lambda expanded: self._set_subscription_section_expanded(
+                preview_group, self.subscription_preview_body, expanded))
+        self.subscription_preview_group = preview_group
+        layout.addWidget(preview_group)
+
+        self.auto_supervision_reset = QCheckBox("收到 supervision-notification 時自動送 supervision-watchdog-reset")
+        self.auto_supervision_reset.setChecked(False)
+        self.auto_supervision_reset.toggled.connect(self._auto_supervision_changed)
+        self.checks["auto_supervision_reset"] = self.auto_supervision_reset
+
+        self.subscribe_button = QPushButton("送出Create Subscription")
+        self.subscribe_button.setObjectName("subscriptionButton")
+        self.subscribe_button.clicked.connect(self.subscribe)
+        self.subscription_action_bar = QHBoxLayout()
+        self.subscription_action_bar.addWidget(self.subscribe_button)
+        self.subscription_action_bar.addSpacing(12)
+        self.subscription_action_bar.addWidget(self.auto_supervision_reset, 1)
+        layout.addLayout(self.subscription_action_bar)
+
+        self.subscription_reply_group = QGroupBox("Create Subscription RPC 回應")
+        self.subscription_reply_group.setFixedHeight(140)
+        reply_layout = QVBoxLayout(self.subscription_reply_group)
+        self.subscription_reply = self._output_edit()
+        self.subscription_reply.setMinimumHeight(66)
+        self.subscription_reply.setMaximumHeight(95)
+        reply_layout.addWidget(self.subscription_reply)
+        layout.addWidget(self.subscription_reply_group)
+        layout.addStretch(1)
+
+        self.stream_box.currentTextChanged.connect(self._subscription_preview_changed)
+        self.event_filter_editor.textChanged.connect(self._subscription_preview_changed)
+        self.event_start_edit.textChanged.connect(self._subscription_preview_changed)
+        self.event_stop_edit.textChanged.connect(self._subscription_preview_changed)
+        self.stream_catalog.currentItemChanged.connect(self._stream_catalog_selection_changed)
+        self.stream_catalog.itemClicked.connect(self._stream_catalog_selection_changed)
+        self.subscription_preview_plan = None
+        self._subscription_preview_changed()
+        return page
+
+    def _set_subscription_section_expanded(self, group, body, expanded):
+        body.setVisible(expanded)
+        if expanded:
+            group.setMinimumHeight(0)
+            group.setMaximumHeight(16777215)
+        else:
+            group.setFixedHeight(max(32, group.fontMetrics().height() + 14))
+        group.updateGeometry()
+
+    def _build_session_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        group = QGroupBox("NETCONF Session 管理")
+        group_layout = QVBoxLayout(group)
+        actions = QHBoxLayout()
+        self.session_status_legend = QLabel(
+            "狀態：已連線／已訂閱 綠色　·　中斷中 黃色　·　已中斷 灰色　·　失敗 紅色")
+        actions.addWidget(self.session_status_legend)
+        actions.addStretch(1)
+        self.disconnect_all_button = QPushButton("全部中斷")
+        self.disconnect_all_button.setToolTip("同時中斷所有 NETCONF sessions；關閉 RPC 最多等 1.5 秒回覆，逾時直接清理連線。")
+        self.disconnect_all_button.setObjectName("disconnectAllSessionsButton")
+        self.disconnect_all_button.setStyleSheet(
+            "QPushButton { background-color: #b42318; color: white; padding: 5px 14px; } "
+            "QPushButton:disabled { background-color: #e5e7eb; color: #8a94a6; }")
+        self.disconnect_all_button.clicked.connect(self.disconnect_all_managed_sessions)
+        actions.addWidget(self.disconnect_all_button)
+        group_layout.addLayout(actions)
+        self.session_table = QTreeWidget()
+        self.session_table.setHeaderLabels(["Session ID", "建立時間", "用途", "狀態", "Stream", "發送紀錄", "操作"])
+        self.session_table.setRootIsDecorated(False)
+        self.session_table.setAlternatingRowColors(True)
+        self.session_table.setMinimumHeight(240)
+        for column, width in enumerate((86, 155, 220, 94, 190, 270, 95)):
+            self.session_table.setColumnWidth(column, width)
+        group_layout.addWidget(self.session_table)
+        layout.addWidget(group, 1)
+        return page
+
+    def _build_measurement_page(self):
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
+
+        self.measurement_capabilities = {}
+        self.epe_capabilities = {}
+        measurements = QGroupBox("Measurement result 範本（MP v17.01 · 11 groups / 59 objects）")
+        measurement_layout = QVBoxLayout(measurements)
+        self.measurement_summary = QLabel("尚未偵測 DUT；勾選規格項目後可產生 subtree filter。")
+        self.measurement_summary.setWordWrap(True)
+        measurement_layout.addWidget(self.measurement_summary)
+        self.measurement_all_notifications = QCheckBox("接收全部 Measurement 通知（不限制群組 / object）")
+        self.measurement_all_notifications.toggled.connect(self._refresh_measurement_preview)
+        measurement_layout.addWidget(self.measurement_all_notifications)
+        search_bar = QHBoxLayout()
+        self.measurement_search = QLineEdit()
+        self.measurement_search.setPlaceholderText("搜尋群組或 object，例如 POWER / RX_LATE")
+        self.measurement_search.setClearButtonEnabled(True)
+        self.measurement_search.textChanged.connect(self._filter_measurements)
+        search_bar.addWidget(self.measurement_search, 1)
+        self.measurement_selected_only = QCheckBox("只看已選項目")
+        self.measurement_selected_only.toggled.connect(self._filter_measurements)
+        search_bar.addWidget(self.measurement_selected_only)
+        measurement_layout.addLayout(search_bar)
+        self.measurement_tree = QTreeWidget()
+        self.measurement_tree.setMinimumHeight(210)
+        self.measurement_tree.setHeaderLabels(["Measurement group / object", "規格", "DUT 支援"])
+        self.measurement_tree.setColumnWidth(0, 260)
+        self.measurement_tree.setColumnWidth(1, 70)
+        self.measurement_tree_items = {}
+        for group, objects in events.MEASUREMENT_GROUPS.items():
+            parent = QTreeWidgetItem(self.measurement_tree, [group, str(len(objects)), "尚未偵測"])
+            parent.setFlags(parent.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            parent.setCheckState(0, Qt.CheckState.Unchecked)
+            parent.setData(0, USER_ROLE, (group, None))
+            self.measurement_tree_items[(group, None)] = parent
+            for name in objects:
+                child = QTreeWidgetItem(parent, [name, "規格", "尚未偵測"])
+                child.setFlags(child.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                child.setCheckState(0, Qt.CheckState.Unchecked)
+                child.setData(0, USER_ROLE, (group, name))
+                self.measurement_tree_items[(group, name)] = child
+        self.measurement_tree.itemChanged.connect(self._measurement_check_changed)
+        measurement_layout.addWidget(self.measurement_tree, 1)
+        select_bar = QHBoxLayout()
+        select_all = QPushButton("全選規格項目")
+        select_all.clicked.connect(lambda: self._set_all_measurements(Qt.CheckState.Checked))
+        select_bar.addWidget(select_all)
+        select_none = QPushButton("清除選取")
+        select_none.clicked.connect(lambda: self._set_all_measurements(Qt.CheckState.Unchecked))
+        select_bar.addWidget(select_none)
+        self.measurement_detect_button = QPushButton("偵測 DUT 可用項目")
+        self.measurement_detect_button.clicked.connect(self.detect_subscription_support)
+        select_bar.addWidget(self.measurement_detect_button)
+        supported_button = QPushButton("只選 DUT 回報項目")
+        supported_button.clicked.connect(self._select_supported_measurements)
+        select_bar.addWidget(supported_button)
+        select_bar.addStretch(1)
+        measurement_layout.addLayout(select_bar)
+        preset_bar = QHBoxLayout()
+        self.measurement_preset = QComboBox()
+        self.measurement_preset.addItems(("CONF §3.1.14.3：EPE POWER", "MP §11.3：Transceiver 全部 + RX_ON_TIME",
+                                          "RX 時序：RX_ON_TIME / RX_EARLY / RX_LATE", "所有 Measurement 通知"))
+        preset_bar.addWidget(self.measurement_preset, 1)
+        preset_button = QPushButton("載入範例")
+        preset_button.clicked.connect(self._load_measurement_preset)
+        preset_bar.addWidget(preset_button)
+        self.measurement_undo_state = None
+        self.measurement_undo_button = QPushButton("復原")
+        self.measurement_undo_button.setEnabled(False)
+        self.measurement_undo_button.setToolTip("復原載入範例、全選、清除或只選 DUT 的前一次選取。")
+        self.measurement_undo_button.clicked.connect(self._undo_measurement_selection)
+        preset_bar.addWidget(self.measurement_undo_button)
+        self.measurement_apply_button = QPushButton("帶入 Subscription（尚未送出）")
+        self.measurement_apply_button.clicked.connect(self.apply_measurement_template)
+        preset_bar.addWidget(self.measurement_apply_button)
+        measurement_layout.addLayout(preset_bar)
+        self.measurement_selection_summary = QLabel()
+        self.measurement_selection_summary.setWordWrap(True)
+        measurement_layout.addWidget(self.measurement_selection_summary)
+        self.measurement_preview = self._output_edit()
+        self.measurement_preview.setMinimumHeight(90)
+        self.measurement_preview.setMaximumHeight(140)
+        measurement_layout.addWidget(self.measurement_preview)
+        send_bar = QHBoxLayout()
+        self.measurement_copy_button = QPushButton("複製 RPC XML")
+        self.measurement_copy_button.clicked.connect(self._copy_measurement_rpc)
+        send_bar.addWidget(self.measurement_copy_button)
+        self.measurement_send_hint = QLabel("連線後可直接送出；請先在 DUT 啟用對應量測。")
+        self.measurement_send_hint.setWordWrap(True)
+        send_bar.addWidget(self.measurement_send_hint, 1)
+        self.measurement_send_button = QPushButton("送出Create Subscription")
+        self.measurement_send_button.setStyleSheet(
+            "QPushButton {background: #2563eb; color: white; padding: 6px;} "
+            "QPushButton:disabled {background: #d8e1ec; color: #708096;}")
+        self.measurement_send_button.setEnabled(False)
+        self.measurement_send_button.clicked.connect(self._send_measurement_subscription)
+        send_bar.addWidget(self.measurement_send_button)
+        measurement_layout.addLayout(send_bar)
+        layout.addWidget(measurements, 1)
+
+        measurement_group = QGroupBox("EPE Measurement 設定範本（先啟用再訂閱）")
+        measurement_layout = QGridLayout(measurement_group)
+        measurement_layout.addWidget(QLabel("範本"), 0, 0)
+        self.epe_template = QComboBox()
+        self.epe_template.addItem("POWER · O-RAN Radio · AVERAGE · 60 秒", ("POWER", 60))
+        self.epe_template.addItem("TEMPERATURE · O-RAN Radio · AVERAGE · 60 秒", ("TEMPERATURE", 60))
+        self.epe_template.addItem("VOLTAGE · O-RAN Radio · AVERAGE · 60 秒", ("VOLTAGE", 60))
+        self.epe_template.addItem("CURRENT · O-RAN Radio · AVERAGE · 60 秒", ("CURRENT", 60))
+        measurement_layout.addWidget(self.epe_template, 0, 1, 1, 3)
+        self.epe_template_button = QPushButton("載入範本")
+        self.epe_template_button.clicked.connect(self._apply_epe_template)
+        measurement_layout.addWidget(self.epe_template_button, 0, 4)
+        measurement_layout.addWidget(QLabel("Measurement interval（秒）"), 1, 0)
+        self.epe_interval = QSpinBox()
+        self.epe_interval.setRange(1, 65535)
+        self.epe_interval.setValue(60)
+        measurement_layout.addWidget(self.epe_interval, 1, 1)
+        measurement_layout.addWidget(QLabel("Object"), 1, 2)
+        self.epe_object = QComboBox()
+        self.epe_object.addItems(("POWER", "TEMPERATURE", "VOLTAGE", "CURRENT"))
+        measurement_layout.addWidget(self.epe_object, 1, 3)
+        self.epe_active = QCheckBox("啟用")
+        self.epe_active.setChecked(True)
+        measurement_layout.addWidget(self.epe_active, 1, 4)
+        measurement_layout.addWidget(QLabel("Object unit"), 2, 0)
+        self.epe_object_unit = QComboBox()
+        self.epe_object_unit.setEditable(True)
+        self.epe_object_unit.addItems(("or-hw:O-RAN-RADIO", "or-hw:O-RU-POWER-AMPLIFIER", "or-hw:O-RU-FPGA",
+                                       "ianahw:power-supply", "ianahw:fan", "ianahw:cpu"))
+        self.epe_object_unit.setToolTip("YANG object-unit 參照 hardware/component/class；所選 class 必須存在於 DUT。")
+        measurement_layout.addWidget(self.epe_object_unit, 2, 1, 1, 2)
+        measurement_layout.addWidget(QLabel("Report info"), 2, 3)
+        self.epe_report_info = QWidget()
+        report_layout = QHBoxLayout(self.epe_report_info)
+        report_layout.setContentsMargins(0, 0, 0, 0)
+        self.epe_reports = {}
+        for name in ("AVERAGE", "MAXIMUM", "MINIMUM", "FREQUENCY_TABLE"):
+            box = QCheckBox(name)
+            box.setChecked(name == "AVERAGE")
+            self.epe_reports[name] = box
+            report_layout.addWidget(box)
+        measurement_layout.addWidget(self.epe_report_info, 2, 4)
+        self.epe_notification_enabled = QCheckBox("同時設定 notification-interval（秒）")
+        measurement_layout.addWidget(self.epe_notification_enabled, 3, 0, 1, 2)
+        self.epe_notification_interval = QSpinBox()
+        self.epe_notification_interval.setRange(1, 65535)
+        self.epe_notification_interval.setValue(60)
+        measurement_layout.addWidget(self.epe_notification_interval, 3, 2)
+        self.epe_capability_hint = QLabel("Report info 可複選；先啟用量測，訂閱才會收到結果。")
+        self.epe_capability_hint.setWordWrap(True)
+        measurement_layout.addWidget(self.epe_capability_hint, 3, 3, 1, 2)
+        self.epe_bins = QWidget()
+        bins_layout = QHBoxLayout(self.epe_bins)
+        bins_layout.setContentsMargins(0, 0, 0, 0)
+        self.epe_bin_count = QSpinBox()
+        self.epe_bin_count.setRange(1, 65535)
+        self.epe_bin_count.setValue(10)
+        self.epe_lower_bound = QLineEdit()
+        self.epe_upper_bound = QLineEdit()
+        for label, widget in (("bin-count", self.epe_bin_count), ("lower-bound", self.epe_lower_bound), ("upper-bound", self.epe_upper_bound)):
+            bins_layout.addWidget(QLabel(label))
+            bins_layout.addWidget(widget)
+        self.epe_bins.setVisible(False)
+        self.epe_reports["FREQUENCY_TABLE"].toggled.connect(self.epe_bins.setVisible)
+        measurement_layout.addWidget(self.epe_bins, 4, 0, 1, 5)
+        self.epe_object.currentTextChanged.connect(self._update_epe_capability_hint)
+        self.epe_to_rpc_button = QPushButton("產生 edit-config 範本並切換至 RPC")
+        self.epe_to_rpc_button.clicked.connect(self._load_epe_config_rpc)
+        measurement_layout.addWidget(self.epe_to_rpc_button, 5, 0, 1, 5)
+        layout.addWidget(measurement_group)
+        layout.addStretch(1)
+        self._load_measurement_preset()
+        return page
+
+    def _build_fault_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        alarm_group = QGroupBox("Fault Management DUT 偵測")
+        alarm_layout = QVBoxLayout(alarm_group)
+        alarm_layout.addWidget(QLabel(
+            "偵測 alarm-notif 與目前 active-alarm-list。現存告警只代表此刻資料，"
+            "不代表 DUT 所有可能上報的 fault ID。"))
+        self.fault_detection_summary = QLabel("尚未偵測 DUT。")
+        self.fault_detection_summary.setWordWrap(True)
+        self.fault_detect_button = QPushButton("偵測 DUT Fault Management 支援")
+        self.fault_detect_button.setObjectName("faultDetectButton")
+        self.fault_detect_button.clicked.connect(self.detect_fault_management_support)
+        detect_bar = QHBoxLayout()
+        detect_bar.addWidget(self.fault_detection_summary, 1)
+        detect_bar.addWidget(self.fault_detect_button)
+        alarm_layout.addLayout(detect_bar)
+        layout.addWidget(alarm_group)
+
+        self.fault_template_panel = NotificationTemplatePanel(CodeEditor, fault_only=True)
+        self.fault_template_panel.apply_requested.connect(self._apply_fault_filter)
+        self.fault_template_panel.send_requested.connect(
+            lambda xml: self._send_template_subscription("fault-management", xml))
+        self.fault_notification_tree = self.fault_template_panel
+        self.fault_notification_button = self.fault_template_panel.apply_button
+        layout.addWidget(self.fault_template_panel, 1)
+        return page
+
+    def _build_netconf_template_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        self.netconf_detect_button = QPushButton("偵測 DUT Stream / 比對已載入 YANG")
+        self.netconf_detect_button.clicked.connect(self.detect_subscription_support)
+        layout.addWidget(self.netconf_detect_button, 0, Qt.AlignmentFlag.AlignLeft)
+        self.netconf_template_panel = NotificationTemplatePanel(CodeEditor)
+        self.netconf_template_panel.apply_requested.connect(
+            lambda xml: self._apply_notification_filter("NETCONF", xml))
+        self.netconf_template_panel.send_requested.connect(
+            lambda xml: self._send_template_subscription("NETCONF", xml))
+        layout.addWidget(self.netconf_template_panel, 1)
+        return page
+
+    def _apply_notification_filter(self, stream, xml):
+        self.stream_box.setCurrentText(stream)
+        self.event_filter_editor.setPlainText(xml)
+        self.workspace_tabs.setCurrentWidget(self.subscription_page)
+        self.notification_status.setText("已帶入 " + stream + " 範本；請按「送出Create Subscription」建立訂閱。")
+
+    def _apply_fault_filter(self, xml):
+        self._apply_notification_filter("fault-management", xml)
+
+    def _send_template_subscription(self, stream, xml):
+        if not self.subscribe_button.isEnabled() or self.busy or not self.client.connected:
+            return
+        # Templates preview a live subscription. Never inherit hidden replay
+        # dates from an earlier visit to the Subscription form.
+        self.event_start_edit.clear()
+        self.event_stop_edit.clear()
+        self._apply_notification_filter(stream, xml)
+        self.subscribe()
+
     def _build_event_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
         bar = QHBoxLayout()
-        bar.addWidget(QLabel("Stream"))
-        self.stream_box = QComboBox()
-        self.stream_box.addItem("NETCONF")
-        bar.addWidget(self.stream_box)
-        self.subscribe_button = QPushButton("開始訂閱")
-        self.subscribe_button.clicked.connect(self.subscribe)
-        bar.addWidget(self.subscribe_button)
-        self.stop_subscription_button = QPushButton("停止（中斷連線）")
-        self.stop_subscription_button.clicked.connect(self.stop_subscription)
-        bar.addWidget(self.stop_subscription_button)
+        bar.addWidget(QLabel("分類"))
+        self.notification_category_filter = QComboBox()
+        self.notification_category_filter.addItem(tr("全部"), "全部")
+        for category in sorted(set(events.EVENT_CATEGORIES.values())):
+            self.notification_category_filter.addItem(tr(category), category)
+        bar.addWidget(self.notification_category_filter)
+        bar.addWidget(QLabel("Notification"))
+        self.notification_event_filter = QComboBox()
+        self.notification_event_filter.addItem(tr("全部"), "全部")
+        for name in sorted(events.EVENT_CATEGORIES):
+            self.notification_event_filter.addItem(name, name)
+        bar.addWidget(self.notification_event_filter)
+        bar.addWidget(QLabel("嚴重度"))
+        self.notification_severity_filter = QComboBox()
+        for value in ("全部", "critical", "major", "minor", "warning", "indeterminate", "cleared", "unknown"):
+            self.notification_severity_filter.addItem(tr(value), value)
+        bar.addWidget(self.notification_severity_filter)
+        self.notification_search = QLineEdit()
+        self.notification_search.setPlaceholderText("搜尋時間、來源、事件或 XML")
+        bar.addWidget(self.notification_search, 1)
+        clear = QPushButton("清除通知")
+        clear.clicked.connect(self.clear_notifications)
+        bar.addWidget(clear)
         export = QPushButton("匯出通知…")
         export.clicked.connect(self.export_notifications)
         bar.addWidget(export)
-        bar.addStretch(1)
         layout.addLayout(bar)
-        self.notification_status = QLabel("未訂閱；使用目前 session，斷線後不會自動重新訂閱。")
-        self.notification_status.setWordWrap(True)
-        layout.addWidget(self.notification_status)
+        self.notification_count = QLabel("已接收 0 筆通知（最多保留最近 100 筆）")
+        layout.addWidget(self.notification_count)
+
+        split = QSplitter(Qt.Orientation.Vertical)
+        self.notification_tree = QTreeWidget()
+        self.notification_tree.setHeaderLabels(
+            ["Session ID", "時間", "分類", "嚴重度", "來源", "Notification"])
+        self.notification_tree.setAlternatingRowColors(False)
+        self.notification_tree.setRootIsDecorated(False)
+        for column, width in enumerate((100, 230, 180, 100, 210, 230)):
+            self.notification_tree.setColumnWidth(column, width)
+        split.addWidget(self.notification_tree)
         self.notification_pane = self._output_edit()
-        layout.addWidget(self.notification_pane, 1)
+        split.addWidget(self.notification_pane)
+        split.setSizes([360, 260])
+        layout.addWidget(split, 1)
+
+        self.notification_category_filter.currentIndexChanged.connect(self._refresh_notifications)
+        self.notification_event_filter.currentIndexChanged.connect(self._refresh_notifications)
+        self.notification_severity_filter.currentIndexChanged.connect(self._refresh_notifications)
+        self.notification_search.textChanged.connect(self._refresh_notifications)
+        self.notification_tree.currentItemChanged.connect(self._show_notification_detail)
         return page
 
     def _build_result_page(self):
@@ -1998,7 +2600,8 @@ class QtMainWindow(QMainWindow):
         return {
             "mode": "Direct SSH", "host": "127.0.0.1", "port": "830",
             "listen_host": "0.0.0.0", "listen_port": "4334", "source": "running",
-            "timeout": "30", "rpc_timeout": "30", "username": "", "password": "",
+            "timeout": "30", "rpc_timeout": "30", "keepalive": "30",
+            "username": "", "password": "",
             "ssh_key": "", "known_hosts": "", "ssh_auth": "auto", "key_passphrase": "",
             "cert": "", "tls_key": "", "trusted_ca": "", "crl": "",
             "tls_server_name": "", "tls_version": "auto", "netconf_version": "auto",
@@ -2010,7 +2613,8 @@ class QtMainWindow(QMainWindow):
             "admin_auth": "password", "admin_known_hosts": "", "admin_program": "sysrepocfg",
             "admin_timeout": "10",
             "defaults": False, "state": False, "show_candidates": False,
-            "wrap_xml": True, "connection_hidden": False, "auto_reconnect": False,
+            "wrap_xml": True, "connection_hidden": False, "auto_reconnect": True,
+            "auto_supervision_reset": False,
             "rollback_on_error": False, "jump_enabled": False, "jump_verify": False,
             "hostkey_verify": False, "verify_hostname": False, "allow_agent": True,
             "look_for_keys": True, "admin_verify": False, "admin_jump": False,
@@ -2043,6 +2647,7 @@ class QtMainWindow(QMainWindow):
 
     def _apply_values(self, values):
         self._prefs_loading = True
+        migrate_reconnect_default = "keepalive" not in values
         try:
             for name, widget in self.fields.items():
                 if name in values:
@@ -2071,6 +2676,11 @@ class QtMainWindow(QMainWindow):
             for name, box in self.checks.items():
                 if name in values:
                     box.setChecked(bool(values[name]))
+            if migrate_reconnect_default:
+                # Older GUI settings had reconnect off by default and did not
+                # expose keepalive. Move those settings to the safer defaults;
+                # the choice is saved with the next normal preference save.
+                self.checks["auto_reconnect"].setChecked(True)
             self._mode_changed()
         finally:
             self._prefs_loading = False
@@ -2301,8 +2911,14 @@ class QtMainWindow(QMainWindow):
             raise EditError("Port 必須介於 1–65535。")
         timeout = float(self._text("timeout"))
         rpc_timeout = float(self._text("rpc_timeout"))
+        try:
+            keepalive = int(self._text("keepalive"))
+        except ValueError as exc:
+            raise EditError("Session keepalive 請輸入整數秒數；0 代表停用。") from exc
         if timeout < 0 or (not call_home and timeout == 0) or rpc_timeout <= 0:
             raise EditError("Timeout 必須為正數；只有 Call Home 等待可使用 0。")
+        if not 0 <= keepalive <= 3600:
+            raise EditError("Session keepalive 必須介於 0–3600 秒；0 代表停用。")
         endpoint = self._text("listen_host" if call_home else "host")
         if not endpoint:
             raise EditError("Host address is required.")
@@ -2351,7 +2967,8 @@ class QtMainWindow(QMainWindow):
             tls_server_name=self._text("tls_server_name") or None,
             tls_version=None if self.tls_version.currentText() == "auto" else self.tls_version.currentText(),
             netconf_version=None if self.netconf_version.currentText() == "auto" else self.netconf_version.currentText(),
-            timeout=timeout, rpc_timeout=rpc_timeout, bind=self._text("bind") or None, huge_tree=True,
+            timeout=timeout, rpc_timeout=rpc_timeout, keepalive=keepalive or None,
+            bind=self._text("bind") or None, huge_tree=True,
             **jump,
         )
 
@@ -2393,12 +3010,14 @@ class QtMainWindow(QMainWindow):
         self._sync_controls()
 
     def _reconnect_option_changed(self, *_args):
+        self._schedule_preferences()
         if not self.checks["auto_reconnect"].isChecked():
             self.reconnect_enabled = False
             self.reconnect_due = None
             self.status_label.setText("已停止自動重連；可手動連線。")
-        elif self.client.connected and self.reconnect_settings is not None:
-            self.reconnect_enabled = True
+        else:
+            self.reconnect_enabled = bool(
+                self.client.connected and self.reconnect_settings is not None)
         self._sync_controls()
 
     def stop_reconnect(self):
@@ -2410,8 +3029,14 @@ class QtMainWindow(QMainWindow):
         self._sync_controls()
 
     def _monitor_connection(self):
-        if self.closed or self.demo or self.busy:
+        if self.closed or self._close_requested or self.demo or self.busy:
             return
+        if (self.main_session_record is not None and self.main_session_record.status == "已連線"
+                and not self.client.connected):
+            self.main_session_record.status = "已中斷"
+            self.main_session_record.manager = None
+            self._record_session_action(self.main_session_record, "主要 NETCONF session 中斷", "連線已關閉")
+        self._sync_rpc_controls()
         if self.client.connected:
             self.reconnect_due = None
             return
@@ -2426,12 +3051,14 @@ class QtMainWindow(QMainWindow):
             self.reconnect_due = None
             settings = deepcopy(self.reconnect_settings)
             directory = self.reconnect_schema_dir
+            options = self._options()
             def work(progress):
                 self.client.disconnect()
                 self.client.connect(settings, progress)
                 self.client.load_schema(directory, False, progress)
-                return self.client.read(self._options())
+                return self.client.read(options)
             def done(snapshot):
+                self._register_main_session()
                 self.reconnect_delay = 2
                 self.uncertain = True
                 self._accept_snapshot(snapshot)
@@ -2528,6 +3155,44 @@ class QtMainWindow(QMainWindow):
             self._task_runner = None
             self._task_done_callback = None
             self._task_failed_callback = None
+        if self._close_requested and not self.busy and self._task_thread is None:
+            QTimer.singleShot(0, self.close)
+
+    def _start_disconnect_batch(self, operations, label, done):
+        self.busy = True
+        self.job_name = label
+        self.status_label.setText(label)
+        self.progress.setRange(0, max(1, len(operations)))
+        self.progress.setValue(0)
+        self._sync_controls()
+        self._disconnect_done = done
+        self._disconnect_batch = DisconnectBatch(operations)
+        self._disconnect_timer.start()
+        self._poll_disconnect_batch()
+
+    def _poll_disconnect_batch(self):
+        batch = self._disconnect_batch
+        if batch is None:
+            return
+        finished = batch.poll()
+        self.progress.setValue(batch.completed)
+        suffix = "（完成後自動關閉）" if self._close_requested else ""
+        self.status_label.setText("%s %d / %d%s" % (self.job_name, batch.completed, batch.total, suffix))
+        if not finished:
+            return
+        self._disconnect_timer.stop()
+        callback = self._disconnect_done
+        self._disconnect_batch = self._disconnect_done = None
+        self._finish_task()
+        try:
+            if callback:
+                callback(batch.errors)
+        except Exception as exc:
+            self.show_error(exc)
+        finally:
+            self._sync_controls()
+            if self._close_requested and not self._shutdown_in_progress:
+                QTimer.singleShot(0, self.close)
 
     def _finish_task(self):
         self.busy = False
@@ -2542,27 +3207,37 @@ class QtMainWindow(QMainWindow):
         try:
             settings = self._settings()
             options = self._options()
+            schema_directory = self._text("schema_dir")
             self.save_preferences()
         except Exception as exc:
             self.show_error(exc)
             return
 
         self.reconnect_settings = deepcopy(settings)
-        self.reconnect_schema_dir = self._text("schema_dir")
+        self.reconnect_schema_dir = schema_directory
         self.reconnect_delay = 2
-        self.reconnect_enabled = self.checks["auto_reconnect"].isChecked()
+        # Do not retry authentication/setup failures. Automatic reconnect is
+        # armed after the initial session has completed successfully.
+        self.reconnect_enabled = False
         def work(progress):
             self.client.connect(settings, progress)
-            self.client.load_schema(self._text("schema_dir"), False, progress)
+            self.client.load_schema(schema_directory, False, progress)
             return self.client.read(options)
 
         def done(snapshot):
+            self._register_main_session()
             self._accept_snapshot(snapshot)
+            self.reconnect_enabled = self.checks["auto_reconnect"].isChecked()
             self.reconnect_delay = 2
             self.admin_requires_refresh = False
             self.status_label.setText("已連線並讀取 %s；YANG schema 已載入。" % options.source)
 
-        self._run("連線、讀取 schema 與資料…", work, done)
+        def failed(exc):
+            self.reconnect_enabled = (
+                self.client.connected and self.checks["auto_reconnect"].isChecked())
+            self.show_error(exc)
+
+        self._run("連線、讀取 schema 與資料…", work, done, failed)
 
     def disconnect(self):
         if self.busy:
@@ -2582,8 +3257,34 @@ class QtMainWindow(QMainWindow):
         self._run("中斷連線…", lambda _progress: self.client.disconnect(), self._clear_session)
 
     def _clear_session(self, _value=None):
-        self.notification_manager = None
-        self.notification_timer.stop()
+        if self.main_session_record is not None:
+            record = self.main_session_record
+            record.status = "已中斷"
+            record.manager = None
+            record.watchdog_pending = False
+            self._record_session_action(record, "主要 NETCONF session 中斷", "完成")
+            self.main_session_record = None
+        self._sync_notification_manager()
+        self.streams = {}
+        self.measurement_capabilities = {}
+        self.epe_capabilities = {}
+        self._update_epe_capability_hint()
+        for panel in (self.fault_template_panel, self.netconf_template_panel):
+            panel.update_device_schema({})
+            panel.source.setText("目前未連線；顯示 MP v17.01 YANG 範本。")
+        self.fault_detection_summary.setText("目前未連線，尚未偵測 DUT。")
+        self.event_start = self.event_stop = ""
+        self.event_start_edit.clear()
+        self.event_stop_edit.clear()
+        for item in self.stream_catalog_rows.values():
+            item.setText(3, "尚未偵測")
+            item.setText(4, "-")
+            for column in range(5):
+                item.setBackground(column, QBrush())
+        for (group, name), item in self.measurement_tree_items.items():
+            item.setText(2, "尚未偵測")
+            item.setForeground(2, QBrush())
+        self.measurement_summary.setText("尚未偵測 DUT；勾選規格項目後可產生 subtree filter。")
         self.uncertain = False
         self.admin_requires_refresh = False
         self.snapshot = None
@@ -2601,7 +3302,7 @@ class QtMainWindow(QMainWindow):
         self.status_label.setText("已中斷連線")
 
     def read_all(self):
-        if not self.client.connected or self.busy:
+        if not self.client.connected or self.busy or not self._rpc_allowed():
             return
         try:
             options = self._options()
@@ -2612,7 +3313,7 @@ class QtMainWindow(QMainWindow):
                   lambda _progress: self.client.read(options), self._accept_snapshot)
 
     def refresh_schema(self):
-        if not self.client.connected or self.busy:
+        if not self.client.connected or self.busy or not self._rpc_allowed():
             return
         directory = self._text("schema_dir")
 
@@ -2639,6 +3340,8 @@ class QtMainWindow(QMainWindow):
         """Only compare actual connected peers, never editable form fields."""
         if not self.client.connected:
             return "NETCONF 未連線；未比較。"
+        if not self._rpc_allowed():
+            return "事件訂閱中且 server 不支援 interleave；請先停止訂閱。"
         context = self.client.context
         settings = self.admin_settings
         if context is None or settings is None:
@@ -3350,7 +4053,8 @@ class QtMainWindow(QMainWindow):
         if self.data_tree_tabs.currentIndex() == 1:
             self.read_sysrepo_tree()
             return
-        if not self.client.connected or not self.selection or not self.snapshot or self.busy:
+        if (not self.client.connected or not self.selection or not self.snapshot
+                or self.busy or not self._rpc_allowed()):
             return
         root_tag = self.selection.path[0]
         options = self.snapshot.options
@@ -3714,7 +4418,8 @@ class QtMainWindow(QMainWindow):
         mode = (QPlainTextEdit.LineWrapMode.WidgetWidth if self.wrap_xml.isChecked()
                 else QPlainTextEdit.LineWrapMode.NoWrap)
         for widget in (self.editor, self.preview, self.reply, self.diff, self.audit_pane,
-                       self.notification_pane):
+                       self.notification_pane, self.rpc_editor, self.rpc_preview, self.rpc_reply,
+                       getattr(self, "event_filter_editor", None)):
             if widget is not None:
                 widget.setLineWrapMode(mode)
         self._schedule_preferences()
@@ -3760,13 +4465,250 @@ class QtMainWindow(QMainWindow):
         return pending if isinstance(pending, safety.PendingCommit) else None
 
     def _rpc_allowed(self):
-        if self.notification_manager is None:
-            return True
-        try:
-            return bool(self.client.connected and self.client.manager is self.notification_manager
-                        and any(":interleave:" in str(c) for c in self.client.capabilities))
-        except Exception:
-            return False
+        # Subscriptions use their own NETCONF sessions, leaving the primary
+        # session available for normal RPCs regardless of :interleave.
+        return True
+
+    def _sync_rpc_controls(self):
+        idle = not self.busy
+        connected = self.client.connected and not self.demo
+        allowed = bool(connected and idle and not self._pending() and self._rpc_allowed())
+        self.rpc_send_button.setEnabled(allowed)
+        self.rpc_editor.setReadOnly(not idle)
+        for widget in (self.rpc_template, self.rpc_template_button, self.rpc_load_button,
+                       self.rpc_pretty_button, self.rpc_preview_button):
+            widget.setEnabled(idle)
+        self.subscribe_button.setEnabled(bool(connected and idle and not self._pending()
+            and any(":notification:" in str(c) for c in self.client.capabilities)))
+        can_subscribe = self.subscribe_button.isEnabled()
+        send_hint = ("作業執行中，完成後可送出。" if not idle else
+                     "請先連線 NETCONF；目前可離線預覽。" if not connected else
+                     "請先完成目前的限時提交。" if self._pending() else
+                     "DUT 未宣告 Notification capability。" if not can_subscribe else
+                     "即時訂閱 · 每筆獨立 session；Replay 請至 Subscription 設定。")
+        self.stream_box.setEnabled(idle)
+        self.detect_streams_button.setEnabled(bool(connected and idle and self._rpc_allowed()))
+        self.event_start_edit.setEnabled(idle)
+        self.event_stop_edit.setEnabled(idle)
+        self.event_filter_editor.setReadOnly(not idle)
+        self.measurement_template_button.setEnabled(idle)
+        self.fault_template_panel.setEnabled(idle)
+        self.netconf_template_panel.setEnabled(idle)
+        self.fault_template_panel.set_send_available(can_subscribe, send_hint)
+        self.netconf_template_panel.set_send_available(can_subscribe, send_hint)
+        self.measurement_send_allowed = can_subscribe
+        self.measurement_send_hint.setText(send_hint)
+        self.measurement_send_button.setEnabled(can_subscribe and getattr(self, "measurement_valid", False))
+        self.measurement_apply_button.setEnabled(idle and getattr(self, "measurement_valid", False))
+        self.measurement_detect_button.setEnabled(bool(connected and idle and self._rpc_allowed()))
+        self.netconf_detect_button.setEnabled(bool(connected and idle and self._rpc_allowed()))
+        self.fault_detect_button.setEnabled(bool(connected and idle and self._rpc_allowed()))
+        self.auto_supervision_reset.setEnabled(idle and not self.demo)
+        for widget in (self.epe_template, self.epe_template_button, self.epe_interval,
+                       self.epe_object, self.epe_active, self.epe_object_unit,
+                       self.epe_report_info, self.epe_to_rpc_button):
+            widget.setEnabled(idle)
+        self.epe_bins.setEnabled(idle)
+        self.epe_notification_enabled.setEnabled(idle)
+        self.epe_notification_interval.setEnabled(idle)
+        self._refresh_session_table()
+
+    def _new_session_record(self, purpose, *, main=False):
+        self.session_sequence += 1
+        prefix = "main" if main else "sub"
+        record = ManagedSession("%s-%03d" % (prefix, self.session_sequence), purpose,
+                                datetime.now().astimezone(), main=main)
+        self.session_records.append(record)
+        self._refresh_session_table()
+        return record
+
+    def _register_main_session(self):
+        if not self.client.connected:
+            return None
+        self.measurement_capabilities = {}
+        self.epe_capabilities = {}
+        self._update_epe_capability_hint()
+        self.measurement_summary.setText("新連線：請重新偵測 DUT measurement capability。")
+        for item in self.measurement_tree_items.values():
+            item.setText(2, "尚未偵測")
+        self.fault_template_panel.update_device_schema(self.client.schema.modules)
+        self.netconf_template_panel.update_device_schema(self.client.schema.modules)
+        self.fault_detection_summary.setText("新連線：尚未讀取目前 active alarms。")
+        if self.main_session_record is not None and self.main_session_record.status in {"已連線", "已訂閱"}:
+            self.main_session_record.status = "已中斷（重連）"
+            self.main_session_record.manager = None
+        record = self._new_session_record("主要 RPC／資料讀寫", main=True)
+        record.client = self.client
+        record.manager = self.client.manager
+        record.server_id = str(self.client.manager.session_id or "")
+        record.status = "已連線"
+        self.main_session_record = record
+        self._record_session_action(record, "NETCONF session 建立", "連線成功")
+        return record
+
+    def _record_session_action(self, record, operation, result="已送出", *, refresh=True):
+        when = datetime.now().astimezone().strftime("%H:%M:%S")
+        entry = "%s  %s · %s" % (when, operation, result)
+        record.sent_records.append(entry)
+        record.last_sent = entry
+        self._audit_result("session %s: %s" % (record.session_id, operation), result,
+                           device="%s | %s" % (record.session_id, record.purpose))
+        if refresh:
+            self._refresh_session_table()
+
+    def _refresh_session_table(self):
+        if not hasattr(self, "session_table"):
+            return
+        self.session_table.clear()
+        active_statuses = {"已連線", "已訂閱", "連線中"}
+        status_colors = {
+            "已連線": ("#d9f3df", "#176b35"),
+            "已訂閱": ("#d9f3df", "#176b35"),
+            "已中斷": ("#e5e7eb", "#475569"),
+            "已結束": ("#e5e7eb", "#475569"),
+            "已中斷（重連）": ("#e5e7eb", "#475569"),
+            "連線中": ("#fff0c9", "#805b00"),
+            "中斷中": ("#fff0c9", "#805b00"),
+            "建立失敗": ("#ffe1e1", "#9b1c1c"),
+            "中斷失敗": ("#ffe1e1", "#9b1c1c"),
+        }
+        for record in self.session_records:
+            item = QTreeWidgetItem(self.session_table, [
+                record.server_id or record.session_id,
+                record.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                record.purpose,
+                record.status,
+                record.stream or ("主要工作階段" if record.main else ""),
+                record.last_sent,
+                "",
+            ])
+            item.setData(0, USER_ROLE, record.session_id)
+            background, foreground = status_colors.get(record.status, ("#eeeeee", "#475569"))
+            item.setBackground(3, QBrush(QColor(background)))
+            item.setForeground(3, QBrush(QColor(foreground)))
+            if record.server_id:
+                item.setToolTip(0, "NETCONF server session-id: %s\n本機追蹤 ID: %s" %
+                                (record.server_id, record.session_id))
+            item.setToolTip(5, "\n".join(record.sent_records))
+            disconnect_button = QPushButton("中斷")
+            disconnect_button.setObjectName("sessionDisconnectButton")
+            can_disconnect = record.status in active_statuses and not self.busy
+            disconnect_button.setEnabled(can_disconnect)
+            disconnect_button.setStyleSheet(
+                "QPushButton { background-color: #b42318; color: white; padding: 3px 10px; } "
+                "QPushButton:disabled { background-color: #e5e7eb; color: #8a94a6; }")
+            disconnect_button.clicked.connect(
+                lambda _checked=False, session_id=record.session_id:
+                    self.disconnect_managed_session(session_id))
+            self.session_table.setItemWidget(item, 6, disconnect_button)
+        if hasattr(self, "disconnect_all_button"):
+            can_disconnect_all = bool(self.reconnect_enabled or self.client.connected or any(
+                record.status in active_statuses for record in self.session_records))
+            self.disconnect_all_button.setEnabled(can_disconnect_all and not self.busy)
+
+    def _sync_notification_manager(self):
+        active = next((record for record in reversed(self.session_records)
+                       if record.status == "已訂閱" and record.manager is not None), None)
+        self.notification_manager = active.manager if active else None
+
+    def disconnect_managed_session(self, session_id):
+        record = next((entry for entry in self.session_records
+                       if entry.session_id == session_id), None)
+        if record is None or record.status not in {"已連線", "已訂閱", "連線中"} or self.busy:
+            return
+        if record.main:
+            self.disconnect()
+            return
+        record.status = "中斷中"
+        record.watchdog_pending = False
+
+        def done(_value):
+            record.manager = None
+            record.status = "已中斷"
+            self._record_session_action(record, "NETCONF session 中斷", "完成")
+            self._sync_notification_manager()
+            self.notification_status.setText("已獨立中斷 %s。" % record.session_id)
+
+        def failed(exc):
+            record.status = "中斷失敗"
+            self._record_session_action(record, "NETCONF session 中斷", "失敗：" + type(exc).__name__)
+
+        client = record.client
+        self._run("中斷 %s…" % record.session_id,
+                  lambda _progress: client.disconnect() if client else None, done, failed)
+
+    def disconnect_all_managed_sessions(self):
+        if self.busy:
+            return
+        active_statuses = {"已連線", "已訂閱", "連線中"}
+        targets = [record for record in self.session_records if record.status in active_statuses
+                   or (record.status == "中斷失敗" and record.client is not None and record.client.connected)]
+        if not targets and not self.client.connected:
+            self.reconnect_enabled = False
+            self.reconnect_due = None
+            self.status_label.setText("已停止自動重連；目前沒有可中斷的 NETCONF session。")
+            self._sync_controls()
+            return
+        if (self.client.connected
+                and not self._preserve_current_draft(flush=True)):
+            return
+
+        self.reconnect_enabled = False
+        self.reconnect_due = None
+        original_statuses = {record.session_id: record.status for record in targets}
+        self.notification_timer.stop()
+        for record in targets:
+            record.status = "中斷中"
+            record.watchdog_pending = False
+        self._refresh_session_table()
+
+        clients = {id(record.client): record.client for record in targets if record.client is not None}
+        main_was_connected = self.client.connected
+        if main_was_connected:
+            clients[id(self.client)] = self.client
+        operations = {key: client.disconnect for key, client in clients.items()}
+
+        def done(errors):
+            main_disconnected = False
+            failed = []
+            for record in targets:
+                error = errors.get(id(record.client))
+                if error is not None and record.client is not None and record.client.connected:
+                    record.status = original_statuses[record.session_id]
+                    failed.append(record.session_id)
+                    self._record_session_action(
+                        record, "NETCONF session 中斷", "失敗：" + type(error).__name__, refresh=False)
+                    continue
+                record.manager = None
+                if error is not None:
+                    record.status = "中斷失敗"
+                    failed.append(record.session_id)
+                    self._record_session_action(
+                        record, "NETCONF session 中斷", "失敗：" + type(error).__name__, refresh=False)
+                elif record.main:
+                    record.status = "已中斷"
+                    main_disconnected = True
+                else:
+                    record.status = "已中斷"
+                    self._record_session_action(record, "NETCONF session 中斷", "完成", refresh=False)
+
+            if main_disconnected or (main_was_connected and not self.client.connected):
+                self._clear_session()
+            else:
+                self._sync_notification_manager()
+            if any(record.status == "已訂閱" and record.manager is not None
+                   for record in self.session_records):
+                self.notification_timer.start()
+            summary = "已全部中斷 NETCONF session。"
+            if id(self.client) in errors and self.client.connected and not any(record.main for record in targets):
+                failed.append("主要 session")
+            if failed:
+                summary = "已中斷可用 session；中斷失敗／仍連線：%s。" % ", ".join(failed)
+            self.status_label.setText(summary)
+            self.notification_status.setText(summary)
+            self._refresh_session_table()
+
+        self._start_disconnect_batch(operations, "同時中斷 NETCONF sessions…", done)
 
     def _draft_scope(self):
         context = getattr(self.client, "context", None)
@@ -3967,7 +4909,8 @@ class QtMainWindow(QMainWindow):
 
         def restore_entry():
             entry = selected()
-            if entry is None or not self.client.connected or not self.snapshot or self._pending():
+            if (entry is None or not self.client.connected or not self.snapshot
+                    or self._pending() or not self._rpc_allowed()):
                 detail.setText("請先連線並讀取目標 datastore；限時提交進行中不能載入。")
                 return
             if entry.scope != self._draft_scope() or entry.source != self.snapshot.options.source:
@@ -4371,6 +5314,9 @@ class QtMainWindow(QMainWindow):
         self._text_window("功能狀態 / 停用原因", "\n".join(lines))
 
     def validate_draft(self):
+        if not self._rpc_allowed():
+            self.status_label.setText("事件訂閱中且 server 不支援 interleave；請先停止訂閱。")
+            return
         if self.busy or not self.client.connected or not self.plan or self.plan.rpc is None:
             self.status_label.setText("請先連線並建立有效的 XML 草稿。")
             return
@@ -4494,7 +5440,7 @@ class QtMainWindow(QMainWindow):
     # ---------- local backup / restore ----------
 
     def create_backup(self):
-        if self.busy or not self.client.connected or self._pending():
+        if self.busy or not self.client.connected or self._pending() or not self._rpc_allowed():
             self.status_label.setText("請在已連線且閒置時建立備份。")
             return
         source = self.snapshot.options.source if self.snapshot else self.source_box.currentText()
@@ -4620,149 +5566,885 @@ class QtMainWindow(QMainWindow):
 
     # ---------- events / audit ----------
 
-    def event_settings(self):
-        dialog = QDialog(self)
-        self.lifecycle_dialog = dialog
-        dialog.setWindowTitle("事件訂閱設定 / streams / replay")
-        dialog.resize(950, 600)
-        layout = QVBoxLayout(dialog)
-        form = QGridLayout()
-        form.addWidget(QLabel("Stream"), 0, 0)
-        stream = QComboBox()
-        stream.setEditable(True)
-        stream.addItems(list(self.streams) or ["NETCONF"])
-        stream.setCurrentText(self.stream_box.currentText())
-        form.addWidget(stream, 0, 1)
-        update = QPushButton("更新 streams")
-        form.addWidget(update, 0, 2)
-        form.addWidget(QLabel("startTime"), 1, 0)
-        start = QLineEdit(self.event_start)
-        form.addWidget(start, 1, 1)
-        form.addWidget(QLabel("stopTime"), 2, 0)
-        stop = QLineEdit(self.event_stop)
-        form.addWidget(stop, 2, 1)
-        form.addWidget(QLabel("例：2026-09-09T08:00:00+08:00；stopTime 必須搭配 startTime"), 1, 2, 2, 2)
-        form.setColumnStretch(1, 1)
-        layout.addLayout(form)
-        detail = QLabel("可更新設備 streams；時間留白即即時訂閱。")
-        detail.setWordWrap(True)
-        layout.addWidget(detail)
-        layout.addWidget(QLabel("Subtree filter XML（選用；填通知 payload 的根節點與 namespace，不要包 filter／rpc）"))
-        filter_edit = CodeEditor()
-        filter_edit.setPlainText(self.event_filter_xml)
-        layout.addWidget(filter_edit, 1)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        layout.addWidget(buttons)
+    def _rpc_editor_changed(self):
+        self.raw_rpc_plan = None
+        if not hasattr(self, "rpc_preview"):
+            return
+        try:
+            self.raw_rpc_plan = raw_rpc.prepare(self.rpc_editor.toPlainText())
+            self.rpc_preview.setPlainText(self.raw_rpc_plan.wire_xml)
+            self.rpc_status.setText("待送出 RPC 已隨編輯內容更新；尚未送出。")
+        except Exception as exc:
+            self.rpc_preview.clear()
+            self.rpc_status.setText("RPC XML 尚未完整或格式錯誤：%s" % type(exc).__name__)
 
-        def selected():
-            value = self.streams.get(stream.currentText())
-            detail.setText(("Replay: %s | 最早: %s | %s" % (value.replay, value.earliest, value.description))
-                           if value else "Stream 尚未查到；回放前需先確認 replaySupport。")
+    def _subscription_preview_changed(self, *_args):
+        if not hasattr(self, "subscription_rpc_preview"):
+            return
+        try:
+            stream = self.stream_box.currentText().strip()
+            filter_xml = self.event_filter_editor.toPlainText()
+            if not filter_xml.strip():
+                filter_xml = events.default_stream_filter(stream)
+            options = events.subscription_options(
+                stream, self.streams, filter_xml,
+                self.event_start_edit.text(), self.event_stop_edit.text())
+            self.subscription_preview_plan = raw_rpc.subscription_rpc(options)
+            self._display_subscription_preview(self.subscription_preview_plan.wire_xml)
+            self.subscription_preview_status.setText("待送出的 RPC 已隨表單內容更新；尚未送出。")
+        except Exception as exc:
+            self.subscription_preview_plan = None
+            self.subscription_rpc_preview.clear()
+            self.subscription_preview_status.setText(
+                "目前條件無法產生 Create Subscription RPC：%s" % str(exc))
 
-        def refresh():
-            if self.busy or not self.client.connected or self.demo or not self._rpc_allowed():
-                detail.setText("目前無法讀取 streams；請連線且停止不支援 interleave 的訂閱。")
-                return
-            def done(values):
-                self.streams = values
-                stream.clear()
-                stream.addItems(list(values) or ["NETCONF"])
-                self.stream_box.clear()
-                self.stream_box.addItems(list(values) or ["NETCONF"])
-                selected()
-            self._run("讀取事件 streams…", lambda _progress: events.discover_streams(self.client.manager), done)
+    def _display_subscription_preview(self, xml):
+        self.subscription_rpc_preview.setPlainText(raw_rpc.pretty_xml(xml))
 
-        def save():
+    def load_rpc_template(self):
+        self.rpc_editor.setPlainText(raw_rpc.TEMPLATES[self.rpc_template.currentText()])
+
+    def load_rpc_file(self):
+        filename, _ = QFileDialog.getOpenFileName(self, "載入 RPC XML", "", "XML (*.xml);;All files (*)")
+        if not filename:
+            return
+        try:
+            path = Path(filename)
+            if path.stat().st_size > raw_rpc.MAX_XML_BYTES:
+                raise EditError("RPC XML 上限 2 MiB。")
+            self.rpc_editor.setPlainText(path.read_text(encoding="utf-8-sig"))
+        except Exception as exc:
+            self.show_error(exc)
+
+    def save_rpc_file(self):
+        filename, _ = QFileDialog.getSaveFileName(self, "儲存 RPC XML", "request.xml", "XML (*.xml)")
+        if filename:
             try:
-                events.subscription_options(stream.currentText(), self.streams, filter_edit.toPlainText(),
-                                           start.text(), stop.text())
-                self.stream_box.setCurrentText(stream.currentText())
-                self.event_filter_xml, self.event_start, self.event_stop = (filter_edit.toPlainText(),
-                                                                              start.text(), stop.text())
-                self.lifecycle_dialog = None
-                dialog.accept()
-                self.status_label.setText("訂閱條件已設定；按『開始訂閱』才送出，不會更改現有訂閱。")
+                Path(filename).write_text(self.rpc_editor.toPlainText(), encoding="utf-8", newline="\n")
             except Exception as exc:
-                QMessageBox.critical(dialog, "訂閱條件", redact_secrets(str(exc)))
+                self.show_error(exc)
 
-        def close_dialog():
-            self.lifecycle_dialog = None
-            dialog.reject()
+    def pretty_rpc(self):
+        try:
+            root = raw_rpc.parse_xml(self.rpc_editor.toPlainText())
+            self.rpc_editor.setPlainText(etree.tostring(root, encoding="unicode", pretty_print=True))
+        except Exception as exc:
+            self.show_error(exc)
+
+    def preview_rpc(self):
+        try:
+            if self.raw_rpc_plan is None:
+                self.raw_rpc_plan = raw_rpc.prepare(self.rpc_editor.toPlainText())
+            self.rpc_preview.setPlainText(self.raw_rpc_plan.wire_xml)
+            self.rpc_output_tabs.setCurrentWidget(self.rpc_preview)
+            self.rpc_status.setText("RPC 預覽已產生；尚未送出。")
+            return self.raw_rpc_plan
+        except Exception as exc:
+            self.show_error(exc)
+            return None
+
+    def send_rpc(self):
+        if self.busy:
+            return
+        prepared = self.preview_rpc()
+        if prepared is not None:
+            if prepared.subscription:
+                self._start_subscription_session(prepared, "自訂 subscription: " + prepared.stream)
+            else:
+                self._send_prepared_rpc(prepared)
+
+    def _send_prepared_rpc(self, prepared, automatic=False):
+        if self.busy or not self.client.connected or self.demo or self._pending():
+            self.rpc_status.setText("請先連線；離線示範與限時提交期間無法送出 RPC。")
+            return
+        if prepared.subscription:
+            self._start_subscription_session(prepared, "自訂 subscription: " + prepared.stream)
+            return
+        manager = self.client.manager
+        session_record = self.main_session_record or self._register_main_session()
+        self.rpc_preview.setPlainText(prepared.wire_xml)
+        self.rpc_reply.clear()
+        self.last_sent_xml = prepared.wire_xml
+        operation_name = etree.QName(prepared.operation).localname
+        if session_record is not None:
+            self._record_session_action(session_record, operation_name, "已送出")
+        if prepared.requires_readback:
+            self.uncertain = True
+
+        def done(reply):
+            self.raw_rpc_plan = None
+            display_reply = raw_rpc.pretty_xml(redact_secrets(reply))
+            self.rpc_reply.setPlainText(display_reply)
+            self.rpc_output_tabs.setCurrentWidget(self.rpc_reply)
+            self.reply.setPlainText(display_reply)
+            self.rpc_status.setText("已收到 RPC 回應。")
+            if session_record is not None:
+                self._record_session_action(session_record, operation_name, "已收到 RPC 回應")
+            if prepared.operation == "{urn:ietf:params:xml:ns:netconf:base:1.0}close-session":
+                self.reconnect_enabled = False
+                self.reconnect_due = None
+                self._clear_session()
+            elif prepared.requires_readback:
+                self.rpc_status.setText("已收到 RPC 回應；請重新讀取 DATA TREE 確認設備狀態。")
+            if automatic:
+                self.notification_status.setText("收到 supervision notification，watchdog reset 已回覆。")
             self._sync_controls()
 
-        stream.currentTextChanged.connect(lambda _text: selected())
-        update.clicked.connect(refresh)
-        buttons.accepted.connect(save)
-        buttons.rejected.connect(close_dialog)
-        dialog.finished.connect(lambda _code: setattr(self, "lifecycle_dialog", None))
-        selected()
-        dialog.show()
+        def failed(exc):
+            from ncclient.operations.rpc import RPCError
+            self.raw_rpc_plan = None
+            error_xml = getattr(exc, "xml", None)
+            if isinstance(error_xml, etree._Element):
+                error_xml = etree.tostring(error_xml, encoding="unicode")
+            display_error = raw_rpc.pretty_xml(
+                redact_secrets(error_xml if error_xml is not None else str(exc)))
+            self.rpc_reply.setPlainText(display_error)
+            self.rpc_output_tabs.setCurrentWidget(self.rpc_reply)
+            self.rpc_status.setText("RPC 失敗或結果待確認，請查看回應。")
+            if session_record is not None:
+                self._record_session_action(session_record, operation_name,
+                                            "失敗：" + type(exc).__name__)
+            self._sync_controls()
+            if automatic:
+                self.rpc_status.setText("自動 watchdog reset 失敗；下一筆 supervision notification 到達時會再試。")
+                self.notification_status.setText("watchdog reset 失敗；下一筆 supervision notification 到達時會再試。")
+            else:
+                self.show_error(exc)
+
+        self._run("送出 RPC…", lambda _progress: raw_rpc.execute(self.client, manager, prepared), done, failed)
+
+    def _start_subscription_session(self, prepared, purpose):
+        if self.busy or not self.client.connected or self.demo or self._pending():
+            self.show_error(EditError("請先建立主要 NETCONF 連線；離線示範與限時提交期間無法新增訂閱。"))
+            return
+        try:
+            settings = deepcopy(self.client.context.settings)
+            record = self._new_session_record(purpose)
+            record.stream = prepared.stream
+            self._record_session_action(record, "準備建立訂閱 session", "開始連線")
+        except Exception as exc:
+            self.show_error(exc)
+            return
+        self.subscription_reply.clear()
+        self.notification_status.setText("正在建立獨立 session 並送出 Create Subscription…")
+
+        def work(progress):
+            subscriber = GuiClient()
+            record.client = subscriber
+            subscriber.connect(settings, progress)
+            record.server_id = str(subscriber.manager.session_id or "")
+            if not any(":notification:" in str(cap) for cap in subscriber.capabilities):
+                subscriber.disconnect()
+                raise EditError("Server 不支援 RFC 5277 notifications。")
+            try:
+                available = events.discover_streams(subscriber.manager)
+            except Exception:
+                available = {}
+            actual_stream, note = events.resolve_stream(prepared.stream, available)
+            outgoing = prepared
+            if actual_stream != prepared.stream:
+                rpc = deepcopy(prepared.rpc)
+                operation = children(rpc)[0]
+                stream_node = operation.find("{%s}stream" % events.NOTIFICATION_NS)
+                if stream_node is not None:
+                    stream_node.text = actual_stream
+                    outgoing = raw_rpc.prepare(etree.tostring(rpc, encoding="unicode"))
+            record.manager = subscriber.manager
+            record.stream = actual_stream
+            reply = raw_rpc.execute(subscriber, subscriber.manager, outgoing)
+            return subscriber, outgoing, reply, note
+
+        def done(result):
+            subscriber, outgoing, reply, note = result
+            record.client = subscriber
+            record.manager = subscriber.manager
+            record.status = "已訂閱"
+            record.stream = outgoing.stream
+            self.raw_rpc_plan = outgoing
+            self.rpc_editor.setPlainText(outgoing.wire_xml)
+            self.rpc_preview.setPlainText(outgoing.wire_xml)
+            self.subscription_preview_plan = outgoing
+            self._display_subscription_preview(outgoing.wire_xml)
+            self.subscription_preview_status.setText("已建立訂閱；上方顯示實際送出的 RPC。")
+            display_reply = raw_rpc.pretty_xml(redact_secrets(reply))
+            self.subscription_reply.setPlainText(display_reply)
+            self.rpc_reply.setPlainText(display_reply)
+            self._record_session_action(record, "create-subscription(%s)" % record.stream,
+                                        "已收到 RPC 回應")
+            self._sync_notification_manager()
+            self.notification_timer.start()
+            status = "已訂閱 %s；session %s。" % (record.stream, record.session_id)
+            if note:
+                status += " " + note
+            self.notification_status.setText(status)
+            self.rpc_status.setText("Create Subscription 已在獨立 session 建立。")
+            self.workspace_tabs.setCurrentWidget(self.subscription_page)
+            self._sync_controls()
+
+        def failed(exc):
+            if record.client is not None:
+                record.client.disconnect()
+            record.manager = None
+            record.status = "建立失敗"
+            from ncclient.operations.rpc import RPCError
+            error_xml = getattr(exc, "xml", None)
+            if isinstance(error_xml, etree._Element):
+                error_xml = etree.tostring(error_xml, encoding="unicode")
+            display_error = raw_rpc.pretty_xml(
+                redact_secrets(error_xml if error_xml is not None else str(exc)))
+            self.subscription_reply.setPlainText(display_error)
+            self._record_session_action(record, "create-subscription(%s)" % record.stream,
+                                        "失敗：" + type(exc).__name__)
+            if isinstance(exc, (RPCError, EditError)):
+                self.notification_status.setText("訂閱建立失敗；詳見下方 RPC 回應。")
+            else:
+                self.notification_status.setText("訂閱 session 建立失敗；詳見下方 RPC 回應。")
+            self._sync_notification_manager()
+            self.show_error(exc)
+
+        self._run("建立訂閱 session…", work, done, failed)
+
+    def _auto_supervision_changed(self, enabled):
+        self._schedule_preferences()
+        if not enabled:
+            self.watchdog_pending = False
+            self.watchdog_pending_sessions.clear()
+            for record in self.session_records:
+                record.watchdog_pending = False
+            if self.notification_manager is not None:
+                self.notification_status.setText("已停用自動 watchdog reset；可在 RPC 分頁手動送出。")
+            return
+        if self.notification_manager is None:
+            self.notification_status.setText("已啟用自動 watchdog reset；開始 supervision 訂閱後生效。")
+        else:
+            self.notification_status.setText("已啟用自動 watchdog reset；由收到通知的訂閱 session 回覆。")
+
+    def _send_pending_watchdog_reset(self):
+        if not self.auto_supervision_reset.isChecked() or self.busy:
+            return
+        record = next((entry for entry in self.session_records
+                       if entry.watchdog_pending and entry.status == "已訂閱"), None)
+        if record is None:
+            return
+        if record.client is None or not record.client.connected:
+            record.watchdog_pending = False
+            return
+        if not any(":interleave:" in str(cap) for cap in record.client.capabilities):
+            record.watchdog_pending = False
+            self.notification_status.setText(
+                "收到 supervision notification，但 DUT 未宣告 :interleave；此訂閱 session 無法送 watchdog reset。")
+            return
+        record.watchdog_pending = False
+        prepared = raw_rpc.prepare(raw_rpc.TEMPLATES["supervision-watchdog-reset"])
+        self._record_session_action(record, "supervision-watchdog-reset", "已送出")
+
+        def done(reply):
+            display = raw_rpc.pretty_xml(redact_secrets(reply))
+            self.rpc_reply.setPlainText(display)
+            self.subscription_reply.setPlainText(display)
+            self._record_session_action(record, "supervision-watchdog-reset", "已收到 RPC 回應")
+            self.notification_status.setText(
+                "收到 supervision notification，watchdog reset 已由 %s 回覆。" % record.session_id)
+
+        def failed(exc):
+            self._record_session_action(record, "supervision-watchdog-reset", "失敗：" + type(exc).__name__)
+            self._audit_result("automatic-watchdog-reset", "失敗：" + type(exc).__name__)
+            self.notification_status.setText("watchdog reset 失敗；下一筆 supervision notification 到達時會再試。")
+
+        self._run("自動 supervision-watchdog-reset…",
+                  lambda _progress: raw_rpc.execute(record.client, record.manager, prepared), done, failed)
+
+    def _end_subscription(self, status, record=None):
+        targets = ([record] if record is not None else
+                   [entry for entry in self.session_records if entry.status == "已訂閱"])
+        for record in targets:
+            record.status = "已結束"
+            record.watchdog_pending = False
+            if record.client is not None:
+                record.client.disconnect()
+            record.manager = None
+        self._refresh_session_table()
+        self._sync_notification_manager()
+        if status:
+            self.notification_status.setText(str(status))
+        if not any(record.status == "已訂閱" for record in self.session_records):
+            self.notification_timer.stop()
+
+    def clear_notifications(self):
+        self.notifications.clear()
+        self.event_records.clear()
+        self.notification_unread_count = 0
+        self._update_notification_badge()
+        self.notification_pane.clear()
+        self.notification_count.setText("已接收 0 筆通知（最多保留最近 100 筆）")
+        self._refresh_notifications()
+
+    def _measurement_check_changed(self, item, _column):
+        if getattr(self, "_measurement_check_sync", False):
+            return
+        value = item.data(0, USER_ROLE)
+        if not isinstance(value, tuple):
+            return
+        self._measurement_check_sync = True
+        try:
+            group, name = value
+            self.measurement_all_notifications.blockSignals(True)
+            self.measurement_all_notifications.setChecked(False)
+            self.measurement_all_notifications.blockSignals(False)
+            getattr(self, "measurement_whole_groups", set()).discard(group)
+            self.measurement_tree_items[(group, None)].setText(1, str(len(events.MEASUREMENT_GROUPS[group])))
+            if name is None:
+                state = item.checkState(0)
+                if state != Qt.CheckState.PartiallyChecked:
+                    for index in range(item.childCount()):
+                        item.child(index).setCheckState(0, state)
+            else:
+                parent = item.parent()
+                states = [parent.child(index).checkState(0) for index in range(parent.childCount())]
+                if all(state == Qt.CheckState.Checked for state in states):
+                    parent.setCheckState(0, Qt.CheckState.Checked)
+                elif all(state == Qt.CheckState.Unchecked for state in states):
+                    parent.setCheckState(0, Qt.CheckState.Unchecked)
+                else:
+                    parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+        finally:
+            self._measurement_check_sync = False
+
+        self._refresh_measurement_preview()
+
+    def _apply_epe_template(self):
+        template = self.epe_template.currentData()
+        if not template:
+            return
+        measurement, interval = template
+        self.epe_object.setCurrentText(measurement)
+        self.epe_interval.setValue(interval)
+        self.epe_active.setChecked(True)
+        self.epe_object_unit.setCurrentText("or-hw:O-RAN-RADIO")
+        for name, box in self.epe_reports.items():
+            box.setChecked(name == "AVERAGE")
+
+    def _update_epe_capability_hint(self, *_):
+        capability = self.epe_capabilities.get(self.epe_object.currentText(), {})
+        if not capability:
+            self.epe_capability_hint.setText("此 object 尚無 DUT capability；目前顯示 YANG 可選值。")
+            return
+        reports = capability.get("report_info", [])
+        self.epe_capability_hint.setText("DUT report-info：" + (", ".join(reports) or "未回報") +
+            "；component-class：" + (", ".join(capability.get("units", [])) or "未回報") +
+            "；max-bin-count：" + str(capability.get("max_bin_count") or "未回報"))
+        for value in capability.get("units", []):
+            if self.epe_object_unit.findText(value) < 0:
+                self.epe_object_unit.addItem(value)
+        for name, box in self.epe_reports.items():
+            box.setToolTip("DUT 支援" if name in reports else "DUT 未回報此項")
+
+    def _load_epe_config_rpc(self):
+        try:
+            namespace = "urn:ietf:params:xml:ns:netconf:base:1.0"
+            pm_namespace = "urn:o-ran:performance-management:1.0"
+            root = etree.Element("{%s}edit-config" % namespace,
+                                 nsmap={"nc": namespace, "pm": pm_namespace,
+                                        "or-hw": "urn:o-ran:hardware:1.0",
+                                        "ianahw": "urn:ietf:params:xml:ns:yang:iana-hardware"})
+            target = etree.SubElement(root, "{%s}target" % namespace)
+            etree.SubElement(target, "{%s}running" % namespace)
+            etree.SubElement(root, "{%s}default-operation" % namespace).text = "none"
+            config = etree.SubElement(root, "{%s}config" % namespace)
+            container = etree.SubElement(config, "{%s}performance-measurement-objects" % pm_namespace)
+            interval = etree.SubElement(container, "{%s}epe-measurement-interval" % pm_namespace)
+            interval.set("{%s}operation" % namespace, "replace")
+            interval.text = str(self.epe_interval.value())
+            item = etree.SubElement(container, "{%s}epe-measurement-objects" % pm_namespace)
+            item.set("{%s}operation" % namespace, "replace")
+            etree.SubElement(item, "{%s}measurement-object" % pm_namespace).text = self.epe_object.currentText()
+            etree.SubElement(item, "{%s}active" % pm_namespace).text = (
+                "true" if self.epe_active.isChecked() else "false")
+            object_unit = self.epe_object_unit.currentText().strip()
+            if not object_unit or any(character.isspace() for character in object_unit):
+                raise EditError("Object unit 請輸入有效的 identityref，例如 or-hw:O-RAN-RADIO。")
+            etree.SubElement(item, "{%s}object-unit" % pm_namespace).text = object_unit
+            prefix, separator, value = object_unit.partition(":")
+            if not separator or prefix not in root.nsmap or not value:
+                raise EditError("Object unit 請選擇 or-hw: 或 ianahw: 的有效 class。")
+            reports = [name for name, box in self.epe_reports.items() if box.isChecked()]
+            if not reports:
+                raise EditError("請至少選擇一種 Report info。")
+            capability = self.epe_capabilities.get(self.epe_object.currentText(), {})
+            if capability.get("report_info") and any(name not in capability["report_info"] for name in reports):
+                raise EditError("所選 Report info 不在此 measurement-object 的 DUT 回報清單。")
+            if capability.get("units") and object_unit not in capability["units"]:
+                raise EditError("Object unit 不在此 measurement-object 的 DUT component-class 清單。")
+            for name in reports:
+                etree.SubElement(item, "{%s}report-info" % pm_namespace).text = name
+            if self.epe_notification_enabled.isChecked():
+                notification = etree.SubElement(container, "{%s}notification-interval" % pm_namespace)
+                notification.set("{%s}operation" % namespace, "replace")
+                notification.text = str(self.epe_notification_interval.value())
+            if "FREQUENCY_TABLE" in reports:
+                count = self.epe_bin_count.value()
+                if capability.get("max_bin_count") and count >= int(capability["max_bin_count"]):
+                    raise EditError("bin-count 必須小於 DUT max-bin-count。")
+                try:
+                    lower, upper = Decimal(self.epe_lower_bound.text()), Decimal(self.epe_upper_bound.text())
+                    if not all(v.is_finite() and Decimal("-922337203685477.5808") <= v <= Decimal("922337203685477.5807") and
+                               v.as_tuple().exponent >= -4 for v in (lower, upper)) or lower >= upper:
+                        raise ValueError()
+                except (InvalidOperation, ValueError):
+                    raise EditError("請填入有效的 lower-bound < upper-bound（最多 4 位小數）。")
+                for tag, val in (("bin-count", count), ("lower-bound", lower), ("upper-bound", upper)):
+                    etree.SubElement(item, "{%s}%s" % (pm_namespace, tag)).text = str(val)
+
+            xml = etree.tostring(root, encoding="unicode", pretty_print=True)
+            self.rpc_editor.setPlainText(xml)
+            self.workspace_tabs.setCurrentWidget(self.rpc_page)
+            self.rpc_status.setText("EPE edit-config 範本已產生；請檢查內容後按「送出 RPC」。")
+        except Exception as exc:
+            self.show_error(exc)
+
+    def _load_fault_alarm_rpc(self):
+        self.rpc_editor.setPlainText(raw_rpc.TEMPLATES["get active-alarm-list"])
+        self.workspace_tabs.setCurrentWidget(self.rpc_page)
+        self.rpc_status.setText(
+            "active-alarm-list 查詢範本已載入；請檢查內容後按「送出 RPC」。")
+
+    def detect_fault_management_support(self):
+        if self.busy or not self.client.connected or self.demo or not self._rpc_allowed():
+            return
+        manager = self.client.manager
+
+        def work(_progress):
+            streams, stream_error = {}, ""
+            try:
+                streams = events.discover_streams(manager)
+            except Exception as exc:
+                stream_error = str(exc)
+            count, values, alarm_error = None, {}, ""
+            try:
+                count, values = subscription_templates.discover_alarm_values(manager)
+            except Exception as exc:
+                alarm_error = str(exc)
+            return streams, stream_error, count, values, alarm_error
+
+        def done(result):
+            streams, stream_error, count, values, alarm_error = result
+            if not stream_error:
+                self.streams = streams
+                self._update_stream_catalog(streams)
+            self.fault_template_panel.update_device_schema(self.client.schema.modules,
+                                                           {"alarm-notif": values})
+            detail = "目前告警 %s 筆；已將實際 fault-id / source 等值加入選單。" % count if count is not None else "無法讀取目前告警。"
+            detail += " 告警快照並非 DUT 完整支援清單。"
+            if stream_error:
+                detail += " Stream：" + stream_error
+            if alarm_error:
+                detail += " 告警：" + alarm_error
+            self.fault_detection_summary.setText(detail)
+            self.status_label.setText("Fault Management 偵測完成。")
+
+        self._run("偵測 Fault Management stream、YANG 與目前告警值…", work, done)
+
+    def apply_fault_notification_template(self):
+        self.fault_template_panel.refresh_preview()
+        if self.fault_template_panel.apply_button.isEnabled():
+            self._apply_fault_filter(self.fault_template_panel.filter_xml)
+
+    def _update_stream_catalog(self, streams):
+        current = self.stream_box.currentText()
+        names = list(events.STANDARD_STREAMS)
+        names.extend(name for name in streams if name not in names)
+        self.stream_box.blockSignals(True)
+        self.stream_box.clear()
+        self.stream_box.addItems(names)
+        self.stream_box.setCurrentText(current)
+        self.stream_box.blockSignals(False)
+        for name, item in self.stream_catalog_rows.items():
+            info = streams.get(name)
+            item.setText(3, "支援" if info else "未回報")
+            item.setText(4, "是" if info and info.replay else ("否" if info else "-"))
+            for column in range(5):
+                item.setBackground(column, QBrush(QColor("#d9f3df" if info else "#eeeeee")))
+        self._subscription_preview_changed()
+
+    def _remember_measurement_selection(self):
+        if not getattr(self, "_measurement_initialized", False):
+            return
+        self.measurement_undo_state = dict(
+            states={key: item.checkState(0) for key, item in self.measurement_tree_items.items()},
+            groups=set(getattr(self, "measurement_whole_groups", set())),
+            all_notifications=self.measurement_all_notifications.isChecked())
+        self.measurement_undo_button.setEnabled(True)
+
+    def _undo_measurement_selection(self):
+        if self.measurement_undo_state is None:
+            return
+        state, self.measurement_undo_state = self.measurement_undo_state, None
+        self.measurement_whole_groups = state["groups"]
+        self.measurement_tree.blockSignals(True)
+        for (group, name), item in self.measurement_tree_items.items():
+            item.setCheckState(0, state["states"].get((group, name), Qt.CheckState.Unchecked))
+            if name is None:
+                item.setText(1, "完整群組" if group in state["groups"] else str(len(events.MEASUREMENT_GROUPS[group])))
+        self.measurement_tree.blockSignals(False)
+        self.measurement_all_notifications.blockSignals(True)
+        self.measurement_all_notifications.setChecked(state["all_notifications"])
+        self.measurement_all_notifications.blockSignals(False)
+        self.measurement_undo_button.setEnabled(False)
+        self._refresh_measurement_preview()
+
+    def _set_all_measurements(self, state, *, remember=True):
+        if remember:
+            self._remember_measurement_selection()
+        self.measurement_whole_groups = set()
+        self.measurement_all_notifications.blockSignals(True)
+        self.measurement_all_notifications.setChecked(False)
+        self.measurement_all_notifications.blockSignals(False)
+        self._measurement_check_sync = True
+        try:
+            for (group, name), item in self.measurement_tree_items.items():
+                if name is None:
+                    item.setCheckState(0, state)
+                    item.setText(1, str(len(events.MEASUREMENT_GROUPS[group])))
+                else:
+                    item.setCheckState(0, state)
+        finally:
+            self._measurement_check_sync = False
+
+        self._refresh_measurement_preview()
+
+    def _selected_measurements(self):
+        selected = {}
+        for (group, name), item in self.measurement_tree_items.items():
+            if name is not None and item.checkState(0) == Qt.CheckState.Checked:
+                selected.setdefault(group, []).append(name)
+        return selected
+
+    def _stream_catalog_selection_changed(self, item, *_args):
+        if item is None:
+            return
+        name = str(item.data(0, USER_ROLE))
+        if not name:
+            return
+        default_filter = events.default_stream_filter(name)
+        if self.stream_box.currentText() != name:
+            self.stream_box.setCurrentText(name)
+        if self.event_filter_editor.toPlainText() != default_filter:
+            self.event_filter_editor.setPlainText(default_filter)
+
+    def _measurement_filter_xml(self):
+        if self.measurement_all_notifications.isChecked():
+            return events.measurement_filter()
+        selected = self._selected_measurements()
+        whole = getattr(self, "measurement_whole_groups", set())
+        for group in whole:
+            selected[group] = []
+        if not selected:
+            raise EditError("請選擇至少一個 object，或明確勾選「接收全部 Measurement 通知」。")
+        return events.measurement_filter(selected, self.measurement_capabilities)
+
+    def _filter_measurements(self, *_):
+        if not hasattr(self, "measurement_tree"):
+            return
+        query = self.measurement_search.text().strip().casefold()
+        selected_only = self.measurement_selected_only.isChecked()
+        active_filter = bool(query or selected_only)
+        groups = getattr(self, "measurement_whole_groups", set())
+        if active_filter and getattr(self, "_measurement_expansion", None) is None:
+            self._measurement_expansion = {g: self.measurement_tree_items[g, None].isExpanded()
+                                           for g in events.MEASUREMENT_GROUPS}
+        for group in events.MEASUREMENT_GROUPS:
+            parent = self.measurement_tree_items[group, None]
+            visible = 0
+            for index in range(parent.childCount()):
+                child = parent.child(index)
+                selected = child.checkState(0) == Qt.CheckState.Checked or group in groups
+                matches = not query or query in (group + " " + child.text(0)).casefold()
+                show = matches and (not selected_only or selected)
+                child.setHidden(not show)
+                visible += int(show)
+            parent.setHidden(not visible)
+            if active_filter and visible:
+                parent.setExpanded(True)
+            elif not active_filter and getattr(self, "_measurement_expansion", None) is not None:
+                parent.setExpanded(self._measurement_expansion[group])
+        if not active_filter:
+            self._measurement_expansion = None
+
+    def _refresh_measurement_preview(self):
+        if not hasattr(self, "measurement_preview"):
+            return
+        try:
+            xml = self._measurement_filter_xml()
+            plan = raw_rpc.subscription_rpc(events.subscription_options("measurement-result-stats", {}, xml))
+            plan.rpc.set("message-id", "preview")
+            self.measurement_preview.setPlainText(raw_rpc.pretty_xml(etree.tostring(plan.rpc, encoding="unicode")))
+            self.measurement_valid = True
+            selected = self._selected_measurements()
+            groups = getattr(self, "measurement_whole_groups", set())
+            details = [g + "：完整群組" for g in sorted(groups)]
+            details.extend(g + "：" + "、".join(names) for g, names in selected.items() if g not in groups)
+            text = "訂閱範圍：所有 Measurement 通知（不限 object）" if self.measurement_all_notifications.isChecked() else (
+                "已選 %d 個 object / %d 個完整群組；" % (sum(len(v) for g, v in selected.items() if g not in groups), len(groups))
+                + "；".join(details))
+            self.measurement_selection_summary.setText(text if len(text) < 220 else text[:217] + "…")
+            self.measurement_selection_summary.setToolTip(text)
+            self.measurement_selection_summary.setStyleSheet("color: #176b35;")
+        except Exception as exc:
+            self.measurement_valid = False
+            self.measurement_preview.clear()
+            self.measurement_selection_summary.setText(str(exc))
+            self.measurement_selection_summary.setStyleSheet("color: #b42318; font-weight: 600;")
+        self.measurement_apply_button.setEnabled(self.measurement_valid and not self.busy)
+        self.measurement_copy_button.setEnabled(self.measurement_valid)
+        self.measurement_send_button.setEnabled(self.measurement_valid and getattr(self, "measurement_send_allowed", False))
+        self._filter_measurements()
+
+    def _copy_measurement_rpc(self):
+        self._refresh_measurement_preview()
+        if self.measurement_valid:
+            QApplication.clipboard().setText(self.measurement_preview.toPlainText())
+            self.status_label.setText("Measurement RPC XML 已複製（message-id=preview；從範本頁送出時會產生新 ID）。")
+
+    def _send_measurement_subscription(self):
+        self._refresh_measurement_preview()
+        if self.measurement_valid and self.measurement_send_button.isEnabled():
+            self._send_template_subscription("measurement-result-stats", self._measurement_filter_xml())
+
+    def _load_measurement_preset(self):
+        self._remember_measurement_selection()
+        self._set_all_measurements(Qt.CheckState.Unchecked, remember=False)
+        self.measurement_whole_groups = set()
+        index = self.measurement_preset.currentIndex()
+        self.measurement_all_notifications.setChecked(index == 3)
+        selected = {"epe-statistics": ["POWER"]} if index == 0 else {
+            "rx-window-stats": ["RX_ON_TIME"] if index == 1 else ["RX_ON_TIME", "RX_EARLY", "RX_LATE"]} if index < 3 else {}
+        self._measurement_check_sync = True
+        try:
+            if index == 1:
+                self.measurement_whole_groups.add("transceiver-stats")
+                self.measurement_tree_items[("transceiver-stats", None)].setCheckState(0, Qt.CheckState.Checked)
+            for group, names in selected.items():
+                for name in names:
+                    self.measurement_tree_items[(group, name)].setCheckState(0, Qt.CheckState.Checked)
+            for group in events.MEASUREMENT_GROUPS:
+                parent = self.measurement_tree_items[(group, None)]
+                parent.setText(1, "完整群組" if group in self.measurement_whole_groups else str(len(events.MEASUREMENT_GROUPS[group])))
+                if group in selected:
+                    parent.setCheckState(0, Qt.CheckState.PartiallyChecked)
+                    parent.setExpanded(True)
+        finally:
+            self._measurement_check_sync = False
+        self._refresh_measurement_preview()
+        self._measurement_initialized = True
+
+    def _select_supported_measurements(self):
+        if not any(self.measurement_capabilities.values()):
+            self.measurement_summary.setText("尚無可選的 DUT capability；請先按「偵測 DUT 可用項目」。原選取保留。")
+            return
+        self._remember_measurement_selection()
+        self._set_all_measurements(Qt.CheckState.Unchecked, remember=False)
+        for group, values in self.measurement_capabilities.items():
+            for name in values:
+                item = self.measurement_tree_items.get((group, name))
+                if item is not None:
+                    item.setCheckState(0, Qt.CheckState.Checked)
+        self._refresh_measurement_preview()
+
+    def apply_measurement_template(self):
+        try:
+            self._apply_notification_filter("measurement-result-stats", self._measurement_filter_xml())
+        except Exception as exc:
+            self.show_error(exc)
+
+    def detect_subscription_support(self):
+        if self.busy or not self.client.connected or self.demo or not self._rpc_allowed():
+            return
+        manager = self.client.manager
+
+        def work(_progress):
+            streams, stream_error = {}, ""
+            try:
+                streams = events.discover_streams(manager)
+            except Exception as exc:
+                stream_error = str(exc)
+            measurements, measurement_error = {}, ""
+            try:
+                measurements = events.discover_measurements(manager)
+            except Exception as exc:
+                measurement_error = str(exc)
+            epe, epe_error = {}, ""
+            try:
+                epe = events.discover_epe_capabilities(manager)
+            except Exception as exc:
+                epe_error = str(exc)
+            return streams, stream_error, measurements, measurement_error, epe, epe_error
+
+        def done(result):
+            streams, stream_error, measurements, measurement_error, epe, epe_error = result
+            self.epe_capabilities = epe
+            self._update_epe_capability_hint()
+            if epe_error:
+                self.epe_capability_hint.setText("EPE capability 讀取失敗：" + epe_error)
+            if not stream_error:
+                self.streams = streams
+                self._update_stream_catalog(streams)
+            self.netconf_template_panel.update_device_schema(self.client.schema.modules)
+            self.measurement_capabilities = measurements
+            self.measurement_tree.blockSignals(True)
+            try:
+                for group, values in measurements.items():
+                    parent = self.measurement_tree_items[(group, None)]
+                    for name in sorted(values):
+                        if (group, name) not in self.measurement_tree_items:
+                            item = QTreeWidgetItem(parent, [name, "DUT 額外值", "支援"])
+                            item.setCheckState(0, Qt.CheckState.Unchecked)
+                            item.setData(0, USER_ROLE, (group, name))
+                            self.measurement_tree_items[group, name] = item
+                supported = 0
+                for (group, name), item in self.measurement_tree_items.items():
+                    values = measurements.get(group)
+                    if name is None:
+                        item.setText(2, "%d 項" % len(values) if values is not None else "未回報")
+                    else:
+                        available = values is not None and name in values
+                        item.setText(2, "支援" if available else "未回報")
+                        item.setForeground(2, QBrush(QColor("#16713a" if available else "#777777")))
+                        supported += int(available)
+            finally:
+                self.measurement_tree.blockSignals(False)
+            detail = "MP v17.01：11 群 / 59 項；DUT capability 回報 %d 項。額外值也可勾選。" % supported
+            if measurement_error:
+                detail += " Measurement 讀取失敗：" + measurement_error
+            if stream_error:
+                detail += " Stream 讀取失敗：" + stream_error
+            self.measurement_summary.setText(detail)
+            self._refresh_measurement_preview()
+            self.status_label.setText("已比對 DUT stream、notification YANG 與 measurement capability。")
+
+        self._run("偵測 event streams 與 measurement capabilities…", work, done)
+
+    def event_settings(self):
+        self.workspace_tabs.setCurrentWidget(self.subscription_page)
+        self.stream_box.setFocus()
 
     def subscribe(self):
-        if self.busy or not self.client.connected or self.notification_manager is not None or self.demo or self._pending():
+        if self.busy or not self.client.connected or self.demo or self._pending():
             return
         if not any(":notification:" in str(c) for c in self.client.capabilities):
             self.show_error(EditError("Server 不支援 RFC 5277 notifications。"))
             return
         try:
-            options = events.subscription_options(self.stream_box.currentText(), self.streams,
+            requested_stream = self.stream_box.currentText().strip()
+            self.event_filter_xml = self.event_filter_editor.toPlainText()
+            if not self.event_filter_xml.strip():
+                self.event_filter_xml = events.default_stream_filter(requested_stream)
+                if self.event_filter_xml:
+                    self.event_filter_editor.setPlainText(self.event_filter_xml)
+            self.event_start = self.event_start_edit.text()
+            self.event_stop = self.event_stop_edit.text()
+            options = events.subscription_options(requested_stream, self.streams,
                                                   self.event_filter_xml, self.event_start, self.event_stop)
-            manager = self.client.manager
+            prepared = raw_rpc.subscription_rpc(options)
         except Exception as exc:
             self.show_error(exc)
             return
-        interleave = any(":interleave:" in str(c) for c in self.client.capabilities)
-        def done(_value):
-            self.notification_manager = manager
-            self.notification_timer.start()
-            self.notification_status.setText("已訂閱 %s%s。" %
-                                             (options["stream_name"], "；可同時讀寫" if interleave else "；讀寫暫停，停止須中斷連線"))
-            self._sync_controls()
-        self._run("訂閱事件…", lambda _progress: manager.create_subscription(**options), done)
-
-    def stop_subscription(self):
-        if self.notification_manager is None:
-            return
-        if QMessageBox.question(self, "停止訂閱", "停止訂閱會中斷目前 NETCONF session；不會自動重訂閱。\n確定？",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            self.notification_manager = None
-            self.notification_timer.stop()
-            self.disconnect()
+        self.rpc_editor.setPlainText(prepared.wire_xml)
+        self.raw_rpc_plan = prepared
+        self.subscription_preview_plan = prepared
+        self._display_subscription_preview(prepared.wire_xml)
+        self.subscription_preview_status.setText("送出內容已固定；實際 stream 可能依 DUT 宣告值調整。")
+        self._start_subscription_session(prepared,
+                                         "Subscription 專用: " + self.stream_box.currentText().strip())
 
     def _poll_notifications(self):
-        manager = self.notification_manager
-        if manager is None or not self.client.connected:
+        if self._close_requested:
+            return
+        subscriptions = [record for record in self.session_records
+                         if record.status == "已訂閱" and record.manager is not None]
+        if not subscriptions:
             self.notification_timer.stop()
+            self._sync_notification_manager()
             return
         received = False
-        try:
-            while True:
-                notification = manager.take_notification(block=False)
-                if notification is None:
-                    break
-                text = redact_secrets(notification.notification_xml)
-                self.notifications.append(text)
-                self._record_notification(text)
-                received = True
-                if self.notification_manager is None:
-                    break
-        except Exception as exc:
-            self.notification_status.setText("通知讀取失敗；請中斷連線以結束訂閱。")
-            self._audit_result("notification", "讀取失敗：" + type(exc).__name__)
+        for session_record in subscriptions:
+            manager = session_record.manager
+            client = session_record.client
+            if client is None or not client.connected or client.manager is not manager:
+                self._end_subscription("%s 連線已中斷；此訂閱已結束。" % session_record.session_id,
+                                       session_record)
+                continue
+            try:
+                for _ in range(50):
+                    notification = manager.take_notification(block=False)
+                    if notification is None:
+                        break
+                    text = redact_secrets(notification.notification_xml)
+                    encoded = text.encode("utf-8")
+                    if len(encoded) > 262144:
+                        text = encoded[:262144].decode("utf-8", errors="ignore") + "\n[Notification truncated at 256 KiB]"
+                    self.notifications.append(text)
+                    self._record_notification(text, session_record)
+                    received = True
+                    if session_record.status != "已訂閱":
+                        break
+            except Exception as exc:
+                self._end_subscription("%s 通知讀取失敗；session 已結束。" % session_record.session_id,
+                                       session_record)
+                self._audit_result("notification", "讀取失敗：" + type(exc).__name__)
         if received:
-            self.notification_pane.setPlainText("\n\n".join(self.notifications))
+            self.notification_count.setText(tr("目前保留 %d 筆通知（最多 100 筆）") % len(self.notifications))
+            self._refresh_notifications(select_latest=True)
             self._audit_result("notification", "收到通知（內容僅保留記憶體，不寫入操作紀錄）")
+            self._sync_rpc_controls()
+        self._send_pending_watchdog_reset()
 
-    def _record_notification(self, text):
-        record = events.event_record(text)
+    def _record_notification(self, text, session_record=None):
+        session_id = ""
+        if session_record is not None:
+            session_id = session_record.server_id or session_record.session_id
+        record = events.event_record(text, session_id=session_id)
         self.event_records.append(record)
+        if self._notifications_visible():
+            self.notification_unread_count = 0
+        else:
+            self.notification_unread_count += 1
+        self._update_notification_badge()
+        if self.notification_event_filter.findData(record.event) < 0:
+            self.notification_event_filter.addItem(record.event, record.event)
+        if record.event == "supervision-notification" and self.auto_supervision_reset.isChecked():
+            if session_record is not None:
+                session_record.watchdog_pending = True
+                self.watchdog_pending_sessions.add(session_record.session_id)
+            else:
+                self.watchdog_pending = True
         if record.completed:
-            self.notification_manager = None
-            self.notification_timer.stop()
-            self.notification_status.setText("Server 已送出 notificationComplete，訂閱結束；可重新訂閱。")
-        if hasattr(self, "alarm_tree"):
-            self._refresh_alarms()
+            self._end_subscription("Server 已送出 notificationComplete；該訂閱 session 已結束。",
+                                    session_record)
+            self._sync_controls()
+
+    def _notifications_visible(self):
+        return (hasattr(self, "event_page") and self.isActiveWindow()
+                and not self.isMinimized() and self.event_page.isVisible()
+                and self.workspace_tabs.currentWidget() is self.event_page)
+
+    def _update_notification_badge(self):
+        index = self.workspace_tabs.indexOf(self.event_page)
+        self.notification_tab_bar.set_unread_count(index, self.notification_unread_count)
+        tooltip = (tr("未讀通知：%d 筆；開啟此分頁後標為已讀。") % self.notification_unread_count
+                   if self.notification_unread_count else tr("Notification：目前沒有未讀通知。"))
+        self.workspace_tabs.setTabToolTip(index, tooltip)
+
+    def _mark_notifications_read(self, *_args):
+        if self._notifications_visible() and self.notification_unread_count:
+            self.notification_unread_count = 0
+            self._update_notification_badge()
+
+    def changeEvent(self, event):  # noqa: N802 - Qt API
+        super().changeEvent(event)
+        if event.type() in (QEvent.Type.ActivationChange, QEvent.Type.WindowStateChange):
+            # Notifications received while minimized/inactive stay unread until
+            # the Notification page is actually visible in the foreground.
+            QTimer.singleShot(0, self._mark_notifications_read)
 
     def export_notifications(self):
         if not self.notifications:
@@ -4777,65 +6459,73 @@ class QtMainWindow(QMainWindow):
                 self.show_error(exc)
 
     def show_alarms(self):
-        if getattr(self, "alarm_dialog", None) is not None and self.alarm_dialog.isVisible():
-            self.alarm_dialog.raise_()
-            return
-        dialog = self.alarm_dialog = QDialog(self)
-        dialog.setWindowTitle("NETCONF 告警表格（最近 100 筆；篩選不影響 server 訂閱）")
-        dialog.resize(1100, 700)
-        layout = QVBoxLayout(dialog)
-        bar = QHBoxLayout()
-        severity = QComboBox()
-        for value in ("全部", "critical", "major", "minor", "warning", "indeterminate", "cleared", "unknown"):
-            severity.addItem(tr(value), value)
-        search = QLineEdit()
-        search.setPlaceholderText("搜尋時間、來源、事件或 XML")
-        refresh = QPushButton("篩選")
-        bar.addWidget(severity)
-        bar.addWidget(search, 1)
-        bar.addWidget(refresh)
-        layout.addLayout(bar)
-        table = QTreeWidget()
-        table.setHeaderLabels(["時間", "嚴重度", "來源", "事件"])
-        table.setColumnWidth(0, 250)
-        layout.addWidget(table, 0)
-        detail = self._output_edit()
-        layout.addWidget(detail, 1)
-        self.alarm_tree, self.alarm_detail = table, detail
-        self.alarm_filter_box, self.alarm_search_box = severity, search
-        def update():
-            self._refresh_alarms()
-        refresh.clicked.connect(update)
-        severity.currentTextChanged.connect(lambda _text: update())
-        search.returnPressed.connect(update)
-        table.currentItemChanged.connect(lambda item, _old: detail.setPlainText(
-            self.alarm_rows.get(item.data(0, USER_ROLE), events.EventRecord("", "", "", "", "")).xml
-            if item else ""))
-        dialog.finished.connect(lambda _code: setattr(self, "alarm_dialog", None))
-        self._refresh_alarms()
-        dialog.show()
+        self.workspace_tabs.setCurrentWidget(self.event_page)
+        index = self.notification_event_filter.findData("alarm-notif")
+        self.notification_event_filter.setCurrentIndex(max(0, index))
+        self.notification_search.setFocus()
 
     def _refresh_alarms(self):
-        if not hasattr(self, "alarm_tree") or self.alarm_tree is None:
+        self._refresh_notifications()
+
+    def _refresh_notifications(self, *_args, select_latest=False):
+        if not hasattr(self, "notification_tree"):
             return
-        self.alarm_tree.clear()
-        self.alarm_rows.clear()
-        query = self.alarm_search_box.text().casefold()
-        selected = str(self.alarm_filter_box.currentData() or self.alarm_filter_box.currentText()).lower()
+        self.notification_tree.clear()
+        self.notification_rows = {}
+        query = self.notification_search.text().casefold()
+        category = str(self.notification_category_filter.currentData() or "全部")
+        event = str(self.notification_event_filter.currentData() or "全部")
+        severity = str(self.notification_severity_filter.currentData() or "全部").lower()
+        category_colors = {
+            "軟體管理": "#e8e1ff", "檔案管理": "#e3edff", "載波狀態": "#dcefff",
+            "M-Plane 控制": "#d7f0f0", "Fault Management": "#ffe1e1",
+            "Performance Measurement": "#e1f2d8", "Supervision": "#fff0c9",
+            "同步狀態": "#e0e8ff", "硬體／外部 I/O": "#ece5dd",
+            "安全／憑證": "#f0e0f3", "電源狀態": "#f5e7d3",
+            "天線／波束成形": "#dff1ea", "量測作業": "#e7f4d7",
+            "NETCONF 控制": "#eeeeee", "其他": "#f4f4f4",
+        }
+        last_item = None
         for index, record in enumerate(self.event_records):
-            if selected != "全部" and record.severity != selected:
+            if category != "全部" and record.category != category:
                 continue
-            if query not in (record.time + " " + record.source + " " + record.event + " " + record.xml).casefold():
+            if event != "全部" and record.event != event:
                 continue
-            item = QTreeWidgetItem(self.alarm_tree, [record.time, record.severity, record.source, record.event])
+            if severity != "全部" and record.severity != severity:
+                continue
+            haystack = " ".join((record.session_id, record.time, record.category, record.severity,
+                                  record.source, record.event, record.xml)).casefold()
+            if query not in haystack:
+                continue
+            item = QTreeWidgetItem(self.notification_tree,
+                                   [record.session_id or "—", record.time, record.category,
+                                    record.severity, record.source, record.event])
             item.setData(0, USER_ROLE, index)
+            color = QColor(category_colors.get(record.category, category_colors["其他"]))
+            for column in range(6):
+                item.setBackground(column, QBrush(color))
             if record.severity == "critical":
-                item.setBackground(0, QBrush(QColor("#ffd3d3")))
+                item.setBackground(3, QBrush(QColor("#ffb9b9")))
             elif record.severity == "major":
-                item.setBackground(0, QBrush(QColor("#ffe0bb")))
+                item.setBackground(3, QBrush(QColor("#ffd3a3")))
             elif record.severity == "minor":
-                item.setBackground(0, QBrush(QColor("#fff4bd")))
-            self.alarm_rows[index] = record
+                item.setBackground(3, QBrush(QColor("#fff09e")))
+            elif record.severity == "cleared":
+                item.setBackground(3, QBrush(QColor("#ccebd2")))
+            self.notification_rows[index] = record
+            last_item = item
+        if select_latest and last_item is not None:
+            self.notification_tree.setCurrentItem(last_item)
+            self.notification_tree.scrollToItem(last_item)
+        elif self.notification_tree.topLevelItemCount() == 0:
+            self.notification_pane.clear()
+
+    def _show_notification_detail(self, item, _old=None):
+        if item is None:
+            self.notification_pane.clear()
+            return
+        record = getattr(self, "notification_rows", {}).get(item.data(0, USER_ROLE))
+        self.notification_pane.setPlainText(raw_rpc.pretty_xml(record.xml) if record else "")
 
     # ---------- profiles / templates / workspace tools ----------
 
@@ -5511,7 +7201,7 @@ class QtMainWindow(QMainWindow):
     def show_error(self, exc):
         text = redact_secrets(str(exc))
         self.status_label.setText("操作失敗：" + text[:300])
-        if not self.closed:
+        if not self.closed and not self._close_requested:
             QMessageBox.critical(self, "NETCONF", text)
 
     def _sync_controls(self):
@@ -5532,14 +7222,16 @@ class QtMainWindow(QMainWindow):
                                                   or self.job_name == "自動重新連線…"))
         active_sysrepo = self.data_tree_tabs.currentIndex() == 1
         has_rpc = self.plan is not None and self.plan.rpc is not None
-        can_rpc = connected and idle and has_rpc and not self.uncertain and self.snapshot is not None
+        rpc_allowed = self._rpc_allowed()
+        can_rpc = (connected and idle and has_rpc and not self.uncertain
+                   and self.snapshot is not None and rpc_allowed)
         self.netconf_button.setEnabled(not active_sysrepo and can_rpc and self.snapshot.options.source != "startup")
         self.sysrepo_button.setEnabled(not active_sysrepo and idle and bool(self.admin_connection and self.admin_connection.connected)
                                        and can_rpc and self.snapshot.options.source == "running"
                                        and not self.admin_requires_refresh)
-        self.read_button.setEnabled(connected and idle)
-        self.tree_schema_button.setEnabled(connected and idle)
-        self.refresh_schema_button.setEnabled(connected and idle)
+        self.read_button.setEnabled(connected and idle and rpc_allowed)
+        self.tree_schema_button.setEnabled(connected and idle and rpc_allowed)
+        self.refresh_schema_button.setEnabled(connected and idle and rpc_allowed)
         has_active_tree = (self.sysrepo_tree.data is not None
                            if active_sysrepo else self.snapshot is not None)
         self.tree_export_button.setEnabled(idle and has_active_tree)
@@ -5567,6 +7259,8 @@ class QtMainWindow(QMainWindow):
             has_sysrepo_xml = active_sysrepo and bool(self.editor.toPlainText().strip())
             button.setEnabled(idle and (self.selection is not None or sysrepo_selection_editable
                                         or has_sysrepo_xml))
+        if not active_sysrepo and not rpc_allowed:
+            self.refresh_selected_button.setEnabled(False)
         self.editor.setReadOnly(active_sysrepo or not (idle and selection_editable))
         admin_online = bool(self.admin_connection and self.admin_connection.connected)
         self.sysrepo_read_button.setEnabled(idle and admin_online)
@@ -5583,9 +7277,7 @@ class QtMainWindow(QMainWindow):
         backup_ready = idle and admin_online and not self.admin_requires_refresh
         for button in (self.backup_check_button, self.backup_create_button, self.backup_restore_button):
             button.setEnabled(backup_ready)
-        self.subscribe_button.setEnabled(connected and idle and self.notification_manager is None and not self.demo
-                                         and any(":notification:" in str(c) for c in self.client.capabilities))
-        self.stop_subscription_button.setEnabled(self.notification_manager is not None and idle)
+        self._sync_rpc_controls()
         self.reread_result_button.setEnabled(self.last_attempt is not None and connected and idle)
         self._sync_drafts()
 
@@ -5600,29 +7292,59 @@ class QtMainWindow(QMainWindow):
         self._sync_controls()
 
     def closeEvent(self, event):
-        if self.busy:
-            QMessageBox.information(self, "正在執行", "請等待目前操作完成後再關閉。")
+        if self._shutdown_complete:
+            event.accept()
+            return
+        if self._shutdown_in_progress:
+            event.ignore()
+            return
+        if self.busy or self._task_thread is not None:
+            self._close_requested = True
+            self.reconnect_enabled = False
+            self.reconnect_due = None
+            self.client.cancel.set()
+            self.status_label.setText("已要求關閉；目前作業／全部中斷完成後會自動清理連線並關閉。")
             event.ignore()
             return
         if (self.persist and (self.dirty or self.drafts.entries)
                 and not self._preserve_current_draft(flush=True)):
+            self._close_requested = False
             event.ignore()
             return
-        self.closed = True
+        self._close_requested = True
+        self._shutdown_in_progress = True
+        self.reconnect_enabled = False
+        self.reconnect_due = None
         self.reconnect_timer.stop()
         self.notification_timer.stop()
         self.draft_timer.stop()
         self.preference_timer.stop()
         self.editor_timer.stop()
-        try:
-            self.notification_manager = None
-            if self.admin_connection:
-                self.admin_connection.close()
-            if self.client.connected:
-                self.client.disconnect()
-        finally:
-            self.save_preferences()
-        event.accept()
+        self.save_preferences()
+        self.notification_manager = None
+        clients = {id(record.client): record.client for record in self.session_records if record.client is not None}
+        clients[id(self.client)] = self.client
+        operations = {key: client.disconnect for key, client in clients.items()}
+        if self.admin_connection is not None:
+            operations[id(self.admin_connection)] = self.admin_connection.close
+        for record in self.session_records:
+            record.watchdog_pending = False
+        event.ignore()
+        self._start_disconnect_batch(operations, "關閉程式：清理全部 NETCONF／系統 SSH 連線…", self._finish_shutdown)
+
+    def _finish_shutdown(self, errors):
+        for record in self.session_records:
+            record.manager = None
+            if record.status in {"已連線", "已訂閱", "連線中", "中斷中"}:
+                record.status = "已中斷"
+        self.admin_connection = None
+        self.closed = True
+        self._shutdown_complete = True
+        if errors:
+            self.status_label.setText("連線清理已結束（部分連線未正常回覆）。")
+        # All worker resources have finished; a fresh close event can now be
+        # accepted without blocking Qt or destroying a running QThread.
+        QTimer.singleShot(0, self.close)
 
 
 def build_application():
@@ -5652,6 +7374,9 @@ def build_application():
         QPushButton#sysrepoReadButton:hover { background: #0d9488; }
         QPushButton#sysrepoReadButton:disabled { background: #d8e1ec; color: #708096; border: 1px solid #c7d2df; }
         QPushButton#netconfButton { background: #15803d; color: white; font-weight: 700; padding: 7px 14px; }
+        QPushButton#subscriptionButton { background: #7c3aed; color: white; border: 1px solid #6d28d9; font-weight: 700; padding: 7px 18px; }
+        QPushButton#subscriptionButton:hover { background: #6d28d9; }
+        QPushButton#subscriptionButton:disabled { background: #d8e1ec; color: #708096; border: 1px solid #c7d2df; }
         QPushButton#netconfButton:disabled { background: #d8e1ec; color: #708096; }
         QPushButton#sysrepoButton { background: #b91c1c; color: white; font-weight: 700; padding: 7px 14px; }
         QPushButton#sysrepoButton:disabled { background: #d8e1ec; color: #708096; }
@@ -5711,14 +7436,35 @@ def self_test(window):
     required = {
         "connection_modes": list(MODES),
         "settings_tabs": [window.tabs.tabText(i) for i in range(window.tabs.count())],
+        "workspace_tabs": [window.workspace_tabs.tabText(i)
+                           for i in range(window.workspace_tabs.count())],
         "output_tabs": [window.output_tabs.tabText(i) for i in range(window.output_tabs.count())],
         "source_default": window.source_box.currentText(),
+        "session_keepalive_default": window.fields["keepalive"].text() == "30",
+        "auto_reconnect_default": window.checks["auto_reconnect"].isChecked(),
         "ssh_hostkey_default": window.checks["hostkey_verify"].isChecked(),
         "tls_hostname_default": window.checks["verify_hostname"].isChecked(),
         "main_splitter": isinstance(window.centralWidget().findChild(QSplitter), QSplitter),
         "tree": window.tree is not None,
         "xml_editor": window.editor is not None,
         "preview": window.preview is not None,
+        "subscription_preview": window.subscription_rpc_preview is not None,
+        "subscription_sections_collapsed": (
+            not window.subscription_conditions_group.isChecked()
+            and not window.subscription_preview_group.isChecked()),
+        "stream_catalog_four_rows": (
+            window.stream_catalog.topLevelItemCount() == 4
+            and window.stream_catalog.minimumHeight() == window.stream_catalog.maximumHeight()
+            and window.stream_catalog.maximumHeight() < 155),
+        "session_manager_tab": (window.session_page.isAncestorOf(window.session_table)
+                                and window.session_page.isAncestorOf(window.disconnect_all_button)),
+        "notification_session_id_first": (
+            window.notification_tree.headerItem().text(0) == "Session ID"),
+        "measurement_tab": (window.measurement_page.isAncestorOf(window.measurement_tree)
+                            and window.measurement_page.isAncestorOf(window.epe_template)),
+        "fault_templates_tab": (window.fault_page.isAncestorOf(window.fault_detect_button)
+                                and window.fault_page.isAncestorOf(window.fault_notification_tree)
+                                and window.fault_page.isAncestorOf(window.fault_notification_button)),
         "creation_picker": CreationDialog.__doc__ is not None,
         "data_tree_tabs": [window.data_tree_tabs.tabText(i) for i in range(window.data_tree_tabs.count())],
         "data_tree_tabs_bottom": window.data_tree_tabs.tabPosition() == QTabWidget.TabPosition.South,
@@ -5727,13 +7473,21 @@ def self_test(window):
         "sysrepo_controls_in_system_ssh": window.sysrepo_source is not None and window.sysrepo_read_button is not None,
     }
     passed = (required["source_default"] == "running"
+              and required["session_keepalive_default"] and required["auto_reconnect_default"]
               and required["settings_tabs"][:1] in (["NETCONF連線"], ["NETCONF Connection"])
               and len(required["settings_tabs"]) == 8
-              and len(required["output_tabs"]) == 6
+              and len(required["output_tabs"]) == 5
               and required["ssh_hostkey_default"] is False
               and required["tls_hostname_default"] is False
               and required["main_splitter"] and required["tree"]
               and required["xml_editor"] and required["preview"]
+              and required["workspace_tabs"] == ["資料/XML", "RPC", "Subscription",
+                                                   "Notification", "Measurement範本",
+                                                   "Fault Management範本", "NETCONF Stream訂閱範本", "Session(s)管理"]
+              and required["subscription_preview"] and required["subscription_sections_collapsed"]
+              and required["stream_catalog_four_rows"] and required["session_manager_tab"]
+              and required["notification_session_id_first"]
+              and required["measurement_tab"] and required["fault_templates_tab"]
               and required["creation_picker"]
               and required["data_tree_tabs"] == ["NETCONF", "sysrepocfg"]
               and required["data_tree_tabs_bottom"] and required["sysrepo_missing_red"]
