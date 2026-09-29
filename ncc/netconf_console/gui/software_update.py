@@ -44,6 +44,8 @@ class SoftwareUpdate:
         self.reconnected = False
         self.completed = 0
         self.total = sum(len(options["uris"]) if stage == "download" else 1 for stage in stages)
+        self.current_stage = ""
+        self.current_uri = ""
         self.supervision = SupervisionKeeper(watchdog_records,
                                              lambda record, result: self.emit("watchdog", (record, result)))
         self.resetting = False
@@ -294,6 +296,8 @@ class SoftwareUpdate:
                     software.validate_slot(self.read_inventory(), self.options["slot"], stage)
                 for uri in self.options["uris"] if stage == "download" else (None,):
                     self.check_cancel()
+                    self.current_stage = stage
+                    self.current_uri = uri or ""
                     self.drain_notifications()
                     self.log("送出 software-%s%s" % (stage, "：" + uri if uri else "：" + self.options["slot"]))
                     reply = self.rpc(software.operation_rpc(stage, self.options, uri), "software-" + stage)

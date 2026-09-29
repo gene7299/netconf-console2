@@ -17,13 +17,16 @@
 3. 點選 READ_WRITE slot 帶入目標。Install 前會重讀並排除 active/running slot；
    Activate 僅接受 VALID 且沒有 integrity=NOK 的 slot。READ_ONLY 是 factory slot，
    不列入一般更新操作目標。EMPTY slot 可依 MP 的缺省 active/running 表示法選取；
-   最終仍以 DUT 的 RPC 驗證結果為準。
-4. Download 可選「自填 URI」或「選擇檔案，自動準備 SFTP／URI」。手填時每行填一個完整
+   首次讀取或原選擇不存在時，若有 `active=false` 且 `running=false` 的 READ_WRITE slot，
+   會自動帶入該 slot；最終仍以 DUT 的 RPC 驗證結果為準。
+4. Download 預設為「選擇檔案，自動準備 SFTP／URI」，也可切換為「自填 URI」。手填時每行填一個完整
    `sftp://user@host/path/file` 或 `ftpes://user@host/path/file`。O-RU 直接連到此伺服器取檔；
    自動模式可啟動本機 SFTP，或先將本機檔案上傳至跳板，詳見下一節。
    UI 依 `build-content-download` 提示逐檔下載或封裝套件模式；請提供該 build 所需的全部檔案。
-5. Install 的 `file-names` 使用 manifest 內的 `fileName`，每行一筆。
-   可匯入 manifest.xml、選擇 build 並按「帶入 Build」，填入檔名與預期版本。
+5. Install 的 `file-names` 有四種互斥來源：自動讀取左側選取檔案中的 manifest.xml、直接使用左側
+   Software package ZIP 檔名、自行匯入 manifest.xml，以及自訂欄位。自動讀取也支援 ZIP 內的
+   manifest.xml；單一 build 會直接帶入，若多個 build 可由 ZIP 檔名唯一對應也會自動選取，否則請改用
+   「自行匯入 manifest.xml」選擇 build。帶入 manifest build 時同時填入 `fileName` 與預期版本。
    匯入不會自動選擇硬體相容性或推測伺服器路徑；請確認 product/vendor 和下載 URI。
 6. 「認證／進階」提供 password、certificate、設備既有認證，以及 FTPES appl-password。
    可填多筆 server public keys，每行 `algorithm base64-key`；RSA 使用 YANG 定義的 DER RSAPublicKey
@@ -37,12 +40,14 @@
 2. 從「DUT 可連到的 IP」選擇網卡位址。程式列出已啟用介面的 IPv4／IPv6 位址，排除
    loopback、link-local 等位址；能判斷往 DUT 路由的來源 IP 時會優先選取並標示。
    這是介面／路由資訊，不是從 DUT 實測可達性；DUT 必須能路由到所選 IP 和 SFTP port。
-3. 按「選擇檔案並準備」（可多選）。準備成功後，自動填入唯讀 URI 清單、密碼及可轉換的
-   server public key，Pretty RPC 預覽也會更新。含 Download 的送出按鈕在來源準備完成後才啟用。
+3. 按「選擇檔案並準備」（可多選）。選檔後，Install file-names 的自動來源會先讀取所選
+   manifest／ZIP；準備成功後再填入唯讀 URI 清單、密碼及可轉換的 server public key，Pretty RPC
+   預覽也會更新。含 Download 的送出按鈕在來源準備完成後才啟用。
 4. **直連／本機模式**：只在所選 IP 啟動程式內建的臨時 SFTP。port 預設自動分配，也可指定；
    自動產生臨時帳號、密碼、RSA host key。僅能讀取所選檔案，不提供 shell、寫入或其他目錄。
    不修改 Windows SSH 服務或防火牆設定；若 Windows 提示存取網路，需允許 DUT 所在網路的連入。
-   狀態列顯示 DUT 讀取進度；「停止本機 SFTP」或關閉程式會停止服務。
+   狀態列顯示 DUT 讀取進度；下方 Software Update 進度條會同步顯示目前下載的 bytes 百分比。
+   「停止本機 SFTP」或關閉程式會停止服務。
 5. **SSH 跳板模式**：偵測跳板機的網卡 IP，而非本機 IP。使用跳板既有的 SSH/SFTP server
    與 SSH port，沿用跳板帳號、登入密碼及 host-key 驗證設定，將檔案上傳至
    `/tmp/netconf-update-<唯一識別碼>/`，避免覆蓋既有檔案。上傳完成並核對大小後才產生 URI。
@@ -89,7 +94,9 @@ DUT 需已有對應的伺服器信任設定。檔名與帳號中的特殊字元�
   主 session 重建後，請重新載入 Schema／資料，再進行 DATA TREE 編輯。
 
 下方提供會隨欄位更新的 Pretty RPC 預覽、最後 RPC 回應、最後完成通知、流程紀錄，
-以及複製遮罩 XML。自動流程預覽列出主要更新 RPC；專用訂閱與 inventory RPC 可由預覽選單查看。
+以及複製遮罩 XML。RPC 內容預覽選單只切換要查看的唯讀 XML，不會送出 RPC；自動流程預覽列出主要更新 RPC，
+專用訂閱與 inventory RPC 也可由預覽選單查看。含 Download／Install／Activate 的流程會自動建立專用通知
+session 並訂閱 download-event、install-event、activation-event；只有按下更新操作按鈕才會實際送出。
 
 ## 自訂 RPC、Create Subscription 與 Notification
 

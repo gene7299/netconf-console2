@@ -142,6 +142,11 @@ def selected_files(paths):
     return files
 
 
+def local_sftp_username():
+    """Use an alphanumeric account for DUTs with limited URI parsers."""
+    return "ncc" + secrets.token_hex(4)
+
+
 def make_uri(address, port, username, path):
     ip = ipaddress.ip_address(address)
     host = "[%s]" % ip if ip.version == 6 else str(ip)
@@ -283,7 +288,7 @@ class _SftpLogin(paramiko.ServerInterface):
 class LocalSftpSource:
     def __init__(self, address, port, paths, cancel):
         self.files = selected_files(paths)
-        self.username = "ncc-" + secrets.token_hex(4)
+        self.username = local_sftp_username()
         self.password = secrets.token_urlsafe(24)
         self.key = paramiko.RSAKey.generate(2048)
         self.keys = yang_host_key(self.key)

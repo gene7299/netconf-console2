@@ -52,6 +52,47 @@ class QtWorkspaceTests(unittest.TestCase):
         self.assertGreaterEqual(self.window.height(), self.window.minimumHeight())
         self.assertLessEqual(self.window.height(), 800)
 
+    def test_software_update_source_defaults_and_transfer_progress(self):
+        page = self.window.software_page
+        self.assertEqual(page.download_source.mode.currentData(), "auto")
+        self.assertEqual(page.download_source.mode.currentIndex(), 0)
+        self.assertTrue(page.file_source_buttons["auto-manifest"].isChecked())
+        self.assertTrue(page.files.isReadOnly())
+        self.assertTrue(page.uris.isReadOnly())
+        self.assertGreater(page.uris.height(), page.files.height())
+        self.assertTrue(page.download_hint.isHidden())
+        self.assertEqual(page.progress.maximum(), 100)
+
+        page.active = True
+        page._progress_total = 1
+        page.runner = SimpleNamespace(completed=0, current_stage="download",
+                                      current_uri="sftp://user@host/cobra_sdk-1.2.1.zip")
+        page.download_source.resource = SimpleNamespace(last_read=("cobra_sdk-1.2.1.zip", 50, 100))
+        page._refresh_progress()
+        self.assertEqual(page.progress.value(), 50)
+        page.runner = None
+        page.active = False
+
+    def test_software_inventory_defaults_to_inactive_nonrunning_slot_and_skips_same_refresh(self):
+        from netconf_console.gui.software import Inventory
+
+        page = self.window.software_page
+        self.window.client.connected = False
+        slots = [
+            {"name": "active", "status": "VALID", "active": "true", "running": "true",
+             "product-code": "", "vendor-code": "", "build-id": "", "build-name": "",
+             "build-version": "", "access": "READ_WRITE", "files": []},
+            {"name": "standby", "status": "EMPTY", "active": "false", "running": "false",
+             "product-code": "", "vendor-code": "", "build-id": "", "build-name": "",
+             "build-version": "", "access": "READ_WRITE", "files": []},
+        ]
+        inventory = Inventory(slots=slots)
+        self.assertTrue(page.show_inventory(inventory))
+        self.assertEqual(page.slot.currentData(), "standby")
+        first_item = page.table.topLevelItem(0)
+        self.assertFalse(page.show_inventory(Inventory(slots=slots)))
+        self.assertIs(page.table.topLevelItem(0), first_item)
+
     def test_sysrepo_bottom_tabs_and_readonly_preview_preserve_draft(self):
         window = self.window
         self.assertEqual(window.data_tree_tabs.tabPosition(), window.data_tree_tabs.TabPosition.South)
@@ -375,6 +416,22 @@ class QtWorkspaceTests(unittest.TestCase):
         self.app.processEvents()
         self.assertEqual(observed, ["first", "second"])
 
+    def test_quiet_worker_does_not_refresh_global_busy_ui(self):
+        observed = []
+        status_before = self.window.status_label.text()
+        with patch.object(self.window, "_sync_controls", wraps=self.window._sync_controls) as sync:
+            self.window._run("quiet", lambda _progress: "ok",
+                             lambda value: observed.append(value), quiet=True)
+            deadline = time.monotonic() + 3
+            while self.window.busy and time.monotonic() < deadline:
+                self.app.processEvents()
+                time.sleep(0.01)
+            self.app.processEvents()
+        self.assertEqual(observed, ["ok"])
+        self.assertFalse(self.window.busy)
+        self.assertEqual(self.window.status_label.text(), status_before)
+        self.assertEqual(sync.call_count, 0)
+
     def test_root_delete_stages_one_atomic_remove(self):
         root_item = self.window.tree.topLevelItem(0)
         self.window.tree.setCurrentItem(root_item)
@@ -398,7 +455,8 @@ class QtWorkspaceTests(unittest.TestCase):
         self.assertEqual([self.window.workspace_tabs.tabText(i)
                           for i in range(self.window.workspace_tabs.count())],
                          ["資料/XML", "RPC", "Subscription", "Notification",
-                          "Measurement範本", "Fault Management範本", "NETCONF Stream訂閱範本", "Session(s)管理"])
+                          "Measurement範本", "Fault Management範本", "NETCONF Stream訂閱範本",
+                          "Software Update", "Session(s)管理"])
         self.assertEqual(self.window.source_box.currentText(), "running")
         self.assertFalse(self.window.checks["show_candidates"].isChecked())
         self.assertEqual(self.window.tree.indentation(), 18)

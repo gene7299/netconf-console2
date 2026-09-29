@@ -1125,6 +1125,7 @@ class QtMainWindow(QMainWindow):
         self._task_runner = None
         self._task_done_callback = None
         self._task_failed_callback = None
+        self._task_quiet = False
         self._prefs_loading = False
         self.preferences_error = ""
         self.preferences = empty_book()
@@ -3085,14 +3086,16 @@ class QtMainWindow(QMainWindow):
 
     # ---------- worker dispatch ----------
 
-    def _run(self, label, function, done=None, failed=None):
+    def _run(self, label, function, done=None, failed=None, *, quiet=False):
         if self.busy:
             return
         self.busy = True
+        self._task_quiet = quiet
         self.job_name = label
-        self.status_label.setText(label)
-        self.progress.setRange(0, 0)
-        self._sync_controls()
+        if not quiet:
+            self.status_label.setText(label)
+            self.progress.setRange(0, 0)
+            self._sync_controls()
         thread = QThread(self)
         runner = TaskRunner(function)
         runner.moveToThread(thread)
@@ -3115,7 +3118,7 @@ class QtMainWindow(QMainWindow):
 
     @Slot(str)
     def _task_progress(self, message):
-        if self._task_runner is not None:
+        if self._task_runner is not None and not self._task_quiet:
             self.status_label.setText(message)
 
     @Slot(object)
@@ -3124,6 +3127,7 @@ class QtMainWindow(QMainWindow):
             return
         thread = self._task_thread
         callback = self._task_done_callback
+        quiet = self._task_quiet
         self._finish_task()
         try:
             if callback:
@@ -3131,7 +3135,8 @@ class QtMainWindow(QMainWindow):
         except BaseException as exc:
             self.show_error(exc)
         finally:
-            self._sync_controls()
+            if not quiet:
+                self._sync_controls()
             if thread is not None:
                 thread.quit()
 
@@ -3141,6 +3146,7 @@ class QtMainWindow(QMainWindow):
             return
         thread = self._task_thread
         callback = self._task_failed_callback
+        quiet = self._task_quiet
         self._finish_task()
         try:
             if callback:
@@ -3150,7 +3156,8 @@ class QtMainWindow(QMainWindow):
         except BaseException as failure_exc:
             self.show_error(failure_exc)
         finally:
-            self._sync_controls()
+            if not quiet:
+                self._sync_controls()
             if thread is not None:
                 thread.quit()
 
@@ -3162,6 +3169,7 @@ class QtMainWindow(QMainWindow):
             self._task_runner = None
             self._task_done_callback = None
             self._task_failed_callback = None
+            self._task_quiet = False
         if self._close_requested and not self.busy and self._task_thread is None:
             QTimer.singleShot(0, self.close)
 
@@ -3202,11 +3210,13 @@ class QtMainWindow(QMainWindow):
                 QTimer.singleShot(0, self.close)
 
     def _finish_task(self):
+        quiet = self._task_quiet
         self.busy = False
         self.job_name = ""
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
-        self._sync_controls()
+        if not quiet:
+            self.progress.setRange(0, 1)
+            self.progress.setValue(0)
+            self._sync_controls()
 
     def connect(self):
         if self.busy or self.client.connected:
@@ -7540,10 +7550,13 @@ def install_qt_exception_hook():
 
 def self_test(window):
     # Exercise the bundled read-only DATA TREE tab without sockets.
+    from .software_transfer import local_sftp_username
+
     repo_data = etree.fromstring(b'<data><private xmlns="urn:self-test"><value>1</value></private></data>')
     window.sysrepo_tree.load(repo_data, etree.fromstring(b'<data/>'), window.client.schema)
     window.data_tree_tabs.setCurrentIndex(1)
     repo_item = window.sysrepo_tree.tree.topLevelItem(0)
+    automatic_sftp_username = local_sftp_username()
     required = {
         "connection_modes": list(MODES),
         "settings_tabs": [window.tabs.tabText(i) for i in range(window.tabs.count())],
@@ -7582,19 +7595,23 @@ def self_test(window):
         "sysrepo_missing_red": repo_item.foreground(0).color().name() == "#b42332",
         "netconf_workspace_kept": window.xml_panel is not None and window.editor is not None,
         "sysrepo_controls_in_system_ssh": window.sysrepo_source is not None and window.sysrepo_read_button is not None,
+        "automatic_sftp_username_alphanumeric": automatic_sftp_username.startswith("ncc") and automatic_sftp_username.isalnum(),
     }
+    expected_settings_first_tab = tr("NETCONF連線")
+    expected_workspace_tabs = [tr(label) for label in (
+        "資料/XML", "RPC", "Subscription", "Notification", "Measurement範本",
+        "Fault Management範本", "NETCONF Stream訂閱範本", "Software Update", "Session(s)管理",
+    )]
     passed = (required["source_default"] == "running"
               and required["session_keepalive_default"] and required["auto_reconnect_default"]
-              and required["settings_tabs"][:1] in (["NETCONF連線"], ["NETCONF Connection"])
+              and required["settings_tabs"][:1] == [expected_settings_first_tab]
               and len(required["settings_tabs"]) == 8
               and len(required["output_tabs"]) == 5
               and required["ssh_hostkey_default"] is False
               and required["tls_hostname_default"] is False
               and required["main_splitter"] and required["tree"]
               and required["xml_editor"] and required["preview"]
-              and required["workspace_tabs"] == ["資料/XML", "RPC", "Subscription",
-                                                   "Notification", "Measurement範本",
-                                                   "Fault Management範本", "NETCONF Stream訂閱範本", "Session(s)管理"]
+              and required["workspace_tabs"] == expected_workspace_tabs
               and required["subscription_preview"] and required["subscription_sections_collapsed"]
               and required["stream_catalog_four_rows"] and required["session_manager_tab"]
               and required["notification_session_id_first"]
@@ -7602,7 +7619,8 @@ def self_test(window):
               and required["creation_picker"]
               and required["data_tree_tabs"] == ["NETCONF", "sysrepocfg"]
               and required["data_tree_tabs_bottom"] and required["sysrepo_missing_red"]
-              and required["netconf_workspace_kept"] and required["sysrepo_controls_in_system_ssh"])
+              and required["netconf_workspace_kept"] and required["sysrepo_controls_in_system_ssh"]
+              and required["automatic_sftp_username_alphanumeric"])
     window.sysrepo_tree.clear()
     window.data_tree_tabs.setCurrentIndex(0)
     return {"passed": passed, "qt": "PySide6", "version": VERSION, "checks": required}

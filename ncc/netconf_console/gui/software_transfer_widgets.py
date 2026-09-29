@@ -16,6 +16,7 @@ from .workflow_supervision import SupervisionKeeper
 class DownloadSourcePanel(QWidget):
     prepared = Signal(object)
     invalidated = Signal()
+    paths_changed = Signal()
     mode_changed = Signal(bool)
 
     def __init__(self, owner):
@@ -36,8 +37,8 @@ class DownloadSourcePanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.mode = QComboBox()
-        self.mode.addItem("自填 URI", "manual")
         self.mode.addItem("選擇檔案，自動準備 SFTP／URI", "auto")
+        self.mode.addItem("自填 URI", "manual")
         layout.addWidget(self.mode)
         self.automatic = QWidget()
         form = QFormLayout(self.automatic)
@@ -93,6 +94,10 @@ class DownloadSourcePanel(QWidget):
         form.addRow(self.status)
         layout.addWidget(self.automatic)
         self.automatic.hide()
+        # File selection is the normal Software Update path.  Keep the
+        # automatic panel visible for this initial choice; detection is
+        # deferred to sync(), after the main window has finished building.
+        self.automatic.setVisible(self.automatic_mode)
         self.mode.currentIndexChanged.connect(self._mode_changed)
         self.address.currentIndexChanged.connect(self._selection_changed)
         self.port.valueChanged.connect(self._selection_changed)
@@ -242,6 +247,7 @@ class DownloadSourcePanel(QWidget):
             return
         self.invalidate()
         self.paths = paths
+        self.paths_changed.emit()
         self.files_label.setText("%d 個檔案 · %.1f MiB" % (len(paths), total / 1048576))
         self.files_label.setToolTip("\n".join(paths))
         self.prepare()
@@ -361,7 +367,7 @@ class DownloadSourcePanel(QWidget):
         self.prepare_button.setEnabled(idle and bool(self.paths) and self.address.count() > 0)
         self.stop_button.setEnabled(idle and isinstance(self.resource, LocalSftpSource))
         self.cleanup_button.setEnabled(idle and (bool(self.old_uploads) or isinstance(self.resource, JumpSftpSource)))
-        if self.automatic_mode and idle and not self.working:
+        if self.automatic_mode and idle and not self.working and self.owner.isVisible() and not self.window.demo:
             try:
                 identity = self.identity(self.settings())
             except Exception:

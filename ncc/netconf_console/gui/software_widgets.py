@@ -4,13 +4,15 @@ from datetime import datetime
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event
+from urllib.parse import unquote, urlsplit
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea,
-    QSpinBox, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QPlainTextEdit, QProgressBar,
+    QPushButton, QRadioButton, QScrollArea, QSpinBox, QTabWidget, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from . import software
@@ -20,6 +22,15 @@ from .software_transfer_widgets import DownloadSourcePanel
 
 
 class SoftwareUpdatePage(QWidget):
+    @staticmethod
+    def _set_two_line_height(editor):
+        margins = editor.contentsMargins()
+        height = (2 * editor.fontMetrics().lineSpacing()
+                  + 2 * int(editor.document().documentMargin())
+                  + margins.top() + margins.bottom()
+                  + 2 * editor.frameWidth() + 4)
+        editor.setFixedHeight(int(height))
+
     def __init__(self, window, editor_class):
         super().__init__()
         self.window = window
@@ -33,6 +44,9 @@ class SoftwareUpdatePage(QWidget):
         self.manifests = []
         self._rendering = False
         self._manual_download = None
+        self._file_source = None
+        self._progress_completed = 0
+        self._progress_total = 1
         layout = QVBoxLayout(self)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -79,8 +93,9 @@ class SoftwareUpdatePage(QWidget):
         self.uris.setPlaceholderText("每行一個完整 URI（可多檔）\nsftp://user@server/path/software.zip")
         self.uris.setFixedHeight(84)
         download_form.addWidget(self.uris)
-        self.download_hint = QLabel("可自填 URI，或選擇檔案，自動準備本機／跳板 SFTP 來源。")
+        self.download_hint = QLabel()
         self.download_hint.setWordWrap(True)
+        self.download_hint.hide()
         download_form.addWidget(self.download_hint)
         row.addWidget(download_box, 1)
 
@@ -90,21 +105,37 @@ class SoftwareUpdatePage(QWidget):
         self.slot.setMinimumContentsLength(18)
         self.slot.addItem("先讀取 DUT inventory", "")
         install_form.addRow("目標 slot", self.slot)
+        self.file_source_box = QGroupBox("Install file-names 來源（四選一）")
+        file_source_layout = QVBoxLayout(self.file_source_box)
+        self.file_source_group = QButtonGroup(self)
+        self.file_source_buttons = {}
+        for source, label in (
+                ("auto-manifest", "自動：讀取左側選擇檔案中的 manifest.xml"),
+                ("package-name", "直接使用左側 Software package ZIP 檔名"),
+                ("manual-manifest", "自行匯入 manifest.xml"),
+                ("custom", "自訂 file-names")):
+            button = QRadioButton(label, self.file_source_box)
+            button.setProperty("source", source)
+            self.file_source_group.addButton(button)
+            self.file_source_buttons[source] = button
+            button.toggled.connect(lambda checked, value=source: checked and self._file_source_changed(value))
+            file_source_layout.addWidget(button)
+        import_row = QHBoxLayout()
+        self.import_manifest = QPushButton("選擇 manifest.xml…")
+        self.import_manifest.setEnabled(False)
+        self.import_manifest.clicked.connect(self.load_manifest)
+        import_row.addWidget(self.import_manifest)
+        import_row.addStretch(1)
+        file_source_layout.addLayout(import_row)
+        self.file_source_status = QLabel("預設會從左側選檔自動讀取 manifest.xml。")
+        self.file_source_status.setWordWrap(True)
+        file_source_layout.addWidget(self.file_source_status)
+        install_form.addRow(self.file_source_box)
         self.files = QPlainTextEdit()
         self.files.setPlaceholderText("每行一個 manifest fileName；ZIP 名稱不一定是 file-names。")
-        self.files.setFixedHeight(64)
+        self._set_two_line_height(self.files)
+        self.files.setReadOnly(True)
         install_form.addRow("Install file-names", self.files)
-        manifest_row = QHBoxLayout()
-        self.import_manifest = QPushButton("匯入 manifest.xml")
-        self.import_manifest.clicked.connect(self.load_manifest)
-        self.build = QComboBox()
-        self.build.addItem("選擇 manifest build", None)
-        self.apply_build = QPushButton("帶入 Build")
-        self.apply_build.clicked.connect(self.use_build)
-        manifest_row.addWidget(self.import_manifest)
-        manifest_row.addWidget(self.build, 1)
-        manifest_row.addWidget(self.apply_build)
-        install_form.addRow(manifest_row)
         self.expected_version = QLineEdit()
         self.expected_version.setPlaceholderText("選填；填寫後會比對 DUT build-version")
         install_form.addRow("預期版本", self.expected_version)
@@ -181,7 +212,7 @@ class SoftwareUpdatePage(QWidget):
         self.status.setWordWrap(True)
         body.addWidget(self.status)
         self.progress = QProgressBar()
-        self.progress.setRange(0, 1)
+        self.progress.setRange(0, 100)
         self.progress.setValue(0)
         body.addWidget(self.progress)
 
@@ -194,6 +225,7 @@ class SoftwareUpdatePage(QWidget):
                           ("Software Activate", "activate"), ("Reset", "reset"),
                           ("Software events 訂閱", "subscribe")):
             self.preview_kind.addItem(label, op)
+        self.preview_kind.setToolTip("只顯示將產生的唯讀 XML，不會送出 RPC；實際送出需按更新操作按鈕。")
         preview_row.addWidget(self.preview_kind)
         preview_row.addStretch(1)
         self.copy_button = QPushButton("複製 XML（密碼遮罩）")
@@ -230,6 +262,7 @@ class SoftwareUpdatePage(QWidget):
         self.download_source.mode_changed.connect(self._download_mode_changed)
         self.download_source.prepared.connect(self._apply_download_source)
         self.download_source.invalidated.connect(self._invalidate_download_source)
+        self.download_source.paths_changed.connect(self._refresh_install_file_source)
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.drain_updates)
@@ -238,7 +271,14 @@ class SoftwareUpdatePage(QWidget):
         self.refresh_timer.setInterval(5000)
         self.refresh_timer.timeout.connect(self.refresh_if_visible)
         self.refresh_timer.start()
+        self.file_source_buttons["auto-manifest"].setChecked(True)
         self.update_preview()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # The default automatic source should detect addresses when this tab
+        # is actually opened, without starting a worker during window setup.
+        QTimer.singleShot(0, self.sync)
 
     def options(self):
         return {"slot": self.slot.currentData() or "", "uris": software.lines(self.uris.toPlainText()),
@@ -283,6 +323,7 @@ class SoftwareUpdatePage(QWidget):
         has_reset = "reset" in self.workflow.currentData()
         self.start_button.setText("開始自動更新（含 Reset）" if has_reset else "開始自動更新")
         manual_source = not self.download_source.automatic_mode
+        self.uris.setReadOnly(not manual_source)
         self.auth.setEnabled(manual_source)
         self.password.setEnabled(manual_source and self.auth.currentData() == "password")
         self.keys.setEnabled(manual_source and self.auth.currentData() == "password")
@@ -307,12 +348,64 @@ class SoftwareUpdatePage(QWidget):
         self.keys.setPlainText(values["keys"])
         self.appl_password.setText(values["appl_password"])
         self._rendering = False
+        self._refresh_install_file_source()
         self.update_preview()
         self.sync()
 
     def _invalidate_download_source(self):
         if self.download_source.automatic_mode:
             self._apply_download_source({"uris": [], "auth": "password", "password": "", "keys": "", "appl_password": ""})
+
+    def _set_install_file_values(self, names, version=""):
+        self._rendering = True
+        try:
+            self.files.setPlainText("\n".join(names))
+            self.expected_version.setText(version)
+        finally:
+            self._rendering = False
+        self.update_preview()
+
+    def _file_source_changed(self, source):
+        previous = self._file_source
+        self._file_source = source
+        self.files.setReadOnly(source != "custom")
+        self.import_manifest.setEnabled(source == "manual-manifest")
+        if source in {"auto-manifest", "package-name", "manual-manifest"} and previous != source:
+            self._set_install_file_values([], "")
+            self.manifests = []
+        if source == "auto-manifest":
+            self._refresh_install_file_source()
+        elif source == "package-name":
+            self._refresh_install_file_source()
+        elif source == "manual-manifest":
+            self.file_source_status.setText("請按「選擇 manifest.xml…」，匯入後會帶入所選 build 的 fileName 與版本。")
+        else:
+            self.file_source_status.setText("可直接編輯下方欄位；每行填一個 Install file-names。")
+        self.update_preview()
+
+    def _refresh_install_file_source(self, *_args):
+        source = self._file_source
+        if source not in {"auto-manifest", "package-name"}:
+            return
+        self._set_install_file_values([], "")
+        try:
+            paths = tuple(self.download_source.paths)
+            if source == "package-name":
+                name = software.package_file_name(paths)
+                self._set_install_file_values([name])
+                self.file_source_status.setText("已帶入左側選取的 Software package：%s" % name)
+                return
+            source_name, manifest_text = software.read_selected_manifest(paths)
+            builds = software.read_manifest(manifest_text)
+            package_names = [Path(item).name for item in paths if Path(item).suffix.casefold() == ".zip"]
+            build = software.choose_manifest_build(builds, package_names)
+            self.manifests = builds
+            self._set_install_file_values(build["files"], build["version"])
+            self.file_source_status.setText("已自動讀取 %s：%s / %s（id=%s）" %
+                                            (source_name, build["name"] or "未提供名稱",
+                                             build["version"] or "未提供版本", build["id"] or "未提供"))
+        except Exception as exc:
+            self.file_source_status.setText("尚未自動帶入：" + str(exc))
 
     def copy_preview(self):
         from PySide6.QtWidgets import QApplication
@@ -347,11 +440,31 @@ class SoftwareUpdatePage(QWidget):
         if self.table.minimumHeight() != height or self.table.maximumHeight() != height:
             self.table.setFixedHeight(height)
 
+    @staticmethod
+    def _default_install_slot(slots):
+        for slot in slots:
+            if (slot["access"] == "READ_WRITE"
+                    and slot["active"] in {"false", "0"}
+                    and slot["running"] in {"false", "0"}):
+                return slot["name"]
+        return ""
+
     def show_inventory(self, inventory):
+        changed = self.inventory != inventory
         self.inventory = inventory
         self.inventory_manager = self.window.client.manager if self.window.client.connected else None
+        if not changed:
+            self.stamp.setText("更新：" + datetime.now().strftime("%H:%M:%S"))
+            return False
         previous = self.slot.currentData()
+        writable_names = {slot["name"] for slot in inventory.slots if slot["access"] == "READ_WRITE"}
+        selected_name = previous if previous in writable_names else self._default_install_slot(inventory.slots)
+        table_scroll = (self.table.verticalScrollBar().value(), self.table.horizontalScrollBar().value())
+        file_scroll = (self.file_table.verticalScrollBar().value(), self.file_table.horizontalScrollBar().value())
         self._rendering = True
+        self.table.setUpdatesEnabled(False)
+        self.file_table.setUpdatesEnabled(False)
+        self.slot.setUpdatesEnabled(False)
         self.table.clear()
         self.file_table.clear()
         self.slot.clear()
@@ -372,7 +485,7 @@ class SoftwareUpdatePage(QWidget):
             if slot["access"] == "READ_WRITE":
                 self.slot.addItem("%s · %s · active=%s / running=%s" %
                                   (slot["name"], slot["status"], slot["active"] or "—", slot["running"] or "—"), slot["name"])
-                if slot["name"] == previous:
+                if slot["name"] == selected_name:
                     item.setSelected(True)
             else:
                 item.setToolTip(0, "Factory slot；啟用會回復原廠設定，不提供於一般軟體更新目標。")
@@ -380,22 +493,34 @@ class SoftwareUpdatePage(QWidget):
                 file_item = QTreeWidgetItem([slot["name"]] + [entry[key] or "—" for key in ("name", "version", "local-path", "integrity")])
                 self.file_table.addTopLevelItem(file_item)
                 file_item.setForeground(4, QBrush(QColor({"NOK": "#b91c1c", "OK": "#15803d"}.get(entry["integrity"], "#64748b"))))
-        self.slot.setCurrentIndex(max(0, self.slot.findData(previous)))
+        self.slot.setCurrentIndex(max(0, self.slot.findData(selected_name)))
         for table in (self.table, self.file_table):
             for column in range(table.columnCount()):
                 table.resizeColumnToContents(column)
         self._fit_inventory_height()
+        self.table.verticalScrollBar().setValue(table_scroll[0])
+        self.table.horizontalScrollBar().setValue(table_scroll[1])
+        self.file_table.verticalScrollBar().setValue(file_scroll[0])
+        self.file_table.horizontalScrollBar().setValue(file_scroll[1])
+        self.table.setUpdatesEnabled(True)
+        self.file_table.setUpdatesEnabled(True)
+        self.slot.setUpdatesEnabled(True)
         self._rendering = False
         self.stamp.setText("更新：" + datetime.now().strftime("%H:%M:%S"))
         self.inventory_hint.setText("%d 個 slots · active = 下次開機，running = 目前執行 · 下載模式：%s · 下載完整性檢查：%s" % (
             len(inventory.slots), "逐檔下載（build-content-download）" if inventory.individual_files else "封裝套件",
             "啟用" if inventory.integrity_at_download else "未宣告啟用"))
-        self.download_hint.setText(("DUT 要求逐檔下載：請列出 manifest 所需的所有檔案 URI。" if inventory.individual_files else
-                                   "DUT 使用封裝套件：請填入套件 URI；Install 使用套件內的 fileName。") + " DUT 必須可連到檔案伺服器。")
+        if inventory.individual_files:
+            self.download_hint.setText("DUT 要求逐檔下載：請列出 manifest 所需的所有檔案 URI。")
+            self.download_hint.show()
+        else:
+            self.download_hint.clear()
+            self.download_hint.hide()
         if not self.active:
             self.update_preview()
+        return True
 
-    def read_inventory(self):
+    def read_inventory(self, _checked=False, *, background=False):
         w = self.window
         if w.busy or self.active or w._task_thread is not None or not w.client.connected or w.demo or w._close_requested:
             return
@@ -407,18 +532,19 @@ class SoftwareUpdatePage(QWidget):
             return reply, software.parse_inventory(reply)
         def done(result):
             reply, inventory = result
-            self.show_inventory(inventory)
-            self.inventory_xml.setPlainText(display_xml(reply))
+            changed = self.show_inventory(inventory)
+            if changed or not self.inventory_xml.toPlainText().strip():
+                self.inventory_xml.setPlainText(display_xml(reply))
             w._record_session_action(w.main_session_record, "get software-inventory", "完成")
         def failed(exc):
             self.stamp.setText("讀取失敗；顯示上次資料")
             self.status.setText(str(exc))
             self.auto_refresh.setChecked(False)
-        w._run("讀取 Software Inventory…", work, done, failed)
+        w._run("讀取 Software Inventory…", work, done, failed, quiet=background)
 
     def refresh_if_visible(self):
         if self.isVisible() and self.auto_refresh.isChecked():
-            self.read_inventory()
+            self.read_inventory(background=True)
 
     def load_manifest(self):
         name, _filter = QFileDialog.getOpenFileName(self, "匯入 Software manifest", "", "XML (*.xml);;All files (*)")
@@ -426,24 +552,23 @@ class SoftwareUpdatePage(QWidget):
             return
         try:
             self.manifests = software.read_manifest(Path(name).read_text(encoding="utf-8-sig"))
-            self.build.clear()
-            if len(self.manifests) > 1:
-                self.build.addItem("請選擇符合 DUT 的 build", None)
-            for build in self.manifests:
-                self.build.addItem("%s / %s (id=%s)" % (build["name"], build["version"], build["id"]), build)
             if len(self.manifests) == 1:
-                self.use_build()
+                build = self.manifests[0]
             else:
-                self.status.setText("Manifest 包含多個 build；請選擇符合 DUT product／vendor 的 build，再按「帶入 Build」。")
+                labels = ["%s / %s (id=%s)" % (build["name"], build["version"], build["id"])
+                          for build in self.manifests]
+                selected, ok = QInputDialog.getItem(self, "選擇 manifest build",
+                                                     "請選擇要帶入的 build：", labels, 0, False)
+                if not ok:
+                    return
+                build = self.manifests[labels.index(selected)]
+            self._set_install_file_values(build["files"], build["version"])
+            self.file_source_status.setText("已匯入 %s：%s / %s（id=%s）" %
+                                            (Path(name).name, build["name"] or "未提供名稱",
+                                             build["version"] or "未提供版本", build["id"] or "未提供"))
+            self.status.setText("已匯入 manifest 的 fileName；請確認 product／vendor 與 Download 來源相容。")
         except Exception as exc:
             self.status.setText("Manifest 讀取失敗：" + str(exc))
-
-    def use_build(self):
-        build = self.build.currentData()
-        if build:
-            self.files.setPlainText("\n".join(build["files"]))
-            self.expected_version.setText(build["version"])
-            self.status.setText("已帶入 build 的 fileName 與版本；請確認 product／vendor 相容性並填入下載 URI。")
 
     def start(self, stages):
         w = self.window
@@ -470,7 +595,9 @@ class SoftwareUpdatePage(QWidget):
             self.log_view.clear()
             self.reply.clear()
             self.event_view.clear()
-            self.progress.setRange(0, self.runner.total)
+            self._progress_completed = 0
+            self._progress_total = max(1, self.runner.total)
+            self.progress.setRange(0, self._progress_total * 100)
             self.progress.setValue(0)
             self.status.setText("執行中：" + " → ".join(stages) + "；停止只取消後續步驟，已送出操作仍可能在 DUT 執行。")
             self.status.setStyleSheet("")
@@ -490,6 +617,25 @@ class SoftwareUpdatePage(QWidget):
                 self.record.client.cancel.set()
             self.status.setText("已要求停止後續步驟；等待目前 RPC 結束。已送出的 DUT 作業不會被撤銷。")
             self.stop_button.setEnabled(False)
+
+    def _refresh_progress(self):
+        if not self.active or self.runner is None:
+            return
+        total = max(1, self._progress_total)
+        completed = max(self._progress_completed, int(getattr(self.runner, "completed", 0)))
+        value = min(total * 100, completed * 100)
+        if completed < total and getattr(self.runner, "current_stage", "") == "download":
+            resource = self.download_source.resource
+            read = getattr(resource, "last_read", None)
+            if read:
+                name, count, size = read
+                current_uri = getattr(self.runner, "current_uri", "")
+                uri_name = unquote(urlsplit(current_uri).path.rsplit("/", 1)[-1]) if current_uri else ""
+                read_name = unquote(str(name)).rsplit("/", 1)[-1]
+                if not uri_name or read_name == uri_name:
+                    value += min(99, max(0, count * 100 // max(1, size)))
+        self.progress.setRange(0, total * 100)
+        self.progress.setValue(min(total * 100, value))
 
     def drain_updates(self):
         received = False
@@ -517,8 +663,8 @@ class SoftwareUpdatePage(QWidget):
                 self.download_source.status.setText(value)
             elif kind == "progress":
                 current, total = value
-                self.progress.setRange(0, total)
-                self.progress.setValue(current)
+                self._progress_completed = current
+                self._progress_total = max(1, total)
             elif kind == "action":
                 subscriber, operation, result = value
                 record = self.record if subscriber else self.window.main_session_record
@@ -545,6 +691,7 @@ class SoftwareUpdatePage(QWidget):
         if received:
             self.window.notification_count.setText("目前保留 %d 筆通知（最多 100 筆）" % len(self.window.notifications))
             self.window._refresh_notifications(select_latest=True)
+        self._refresh_progress()
 
     def finished(self, result):
         self.drain_updates()

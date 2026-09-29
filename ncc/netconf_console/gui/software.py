@@ -6,6 +6,8 @@ an absent active/running leaf is not displayed as a fabricated false value.
 
 from dataclasses import dataclass, field
 import base64
+from pathlib import Path
+import zipfile
 from urllib.parse import unquote, urlsplit
 
 from lxml import etree
@@ -229,3 +231,61 @@ def read_manifest(text):
     if not builds:
         raise EditError("找不到 MP §8.3 manifest/builds/build/file（fileName）內容。")
     return builds
+
+
+def manifest_path(paths):
+    """Return the selected manifest.xml path, requiring one unambiguous file."""
+    matches = [Path(path) for path in paths if Path(path).name.casefold() == "manifest.xml"]
+    if not matches:
+        raise EditError("左側選擇檔案中找不到 manifest.xml。")
+    if len(matches) > 1:
+        raise EditError("左側選擇檔案包含多個 manifest.xml，請只保留一個。")
+    return matches[0]
+
+
+def read_selected_manifest(paths):
+    """Read a directly selected manifest or one contained in a selected ZIP."""
+    direct = [Path(path) for path in paths if Path(path).name.casefold() == "manifest.xml"]
+    if len(direct) > 1:
+        raise EditError("左側選擇檔案包含多個 manifest.xml，請只保留一個。")
+    if direct:
+        path = direct[0]
+        return path.name, path.read_text(encoding="utf-8-sig")
+
+    matches = []
+    for path in (Path(item) for item in paths if Path(item).suffix.casefold() == ".zip"):
+        with zipfile.ZipFile(path) as archive:
+            members = [member for member in archive.namelist()
+                       if Path(member).name.casefold() == "manifest.xml"]
+            if len(members) > 1:
+                raise EditError("ZIP %s 內包含多個 manifest.xml，無法自動判斷。" % path.name)
+            if members:
+                matches.append((path.name, members[0], archive.read(members[0])))
+    if not matches:
+        raise EditError("左側選擇檔案及其 ZIP 內找不到 manifest.xml。")
+    if len(matches) > 1:
+        raise EditError("左側選擇的多個 ZIP 都包含 manifest.xml，請只保留一個 Software package。")
+    archive_name, member, payload = matches[0]
+    return "%s!/%s" % (archive_name, member), payload.decode("utf-8-sig")
+
+
+def package_file_name(paths):
+    """Return the selected Software package ZIP basename."""
+    names = [Path(path).name for path in paths if Path(path).suffix.casefold() == ".zip"]
+    if not names:
+        raise EditError("左側選擇檔案中找不到 Software package ZIP 檔。")
+    if len(names) > 1:
+        raise EditError("左側選擇檔案包含多個 ZIP，請只保留一個 Software package。")
+    return names[0]
+
+
+def choose_manifest_build(builds, package_names=()):
+    """Choose one build, using a selected package name when it disambiguates."""
+    if len(builds) == 1:
+        return builds[0]
+    package_names = {str(name).casefold() for name in package_names}
+    matches = [build for build in builds
+               if package_names.intersection(str(name).casefold() for name in build["files"])]
+    if len(matches) == 1:
+        return matches[0]
+    raise EditError("Manifest 包含多個 build，無法由左側檔名唯一判斷；請改用「自行匯入 manifest.xml」選擇 build，或使用自訂 file-names。")
