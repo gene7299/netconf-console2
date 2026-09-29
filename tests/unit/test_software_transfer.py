@@ -9,7 +9,7 @@ from netconf_console.gui.software_transfer import local_sftp_username, make_uri
 
 
 class SoftwareTransferTests(unittest.TestCase):
-    @patch("ncc.netconf_console.gui.software_transfer.secrets.token_hex", return_value="844a64f9")
+    @patch("netconf_console.gui.software_transfer.secrets.token_hex", return_value="844a64f9")
     def test_automatic_sftp_username_is_alphanumeric(self, _token_hex):
         username = local_sftp_username()
         self.assertEqual(username, "ncc844a64f9")

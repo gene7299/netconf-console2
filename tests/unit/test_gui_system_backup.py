@@ -48,8 +48,8 @@ class SystemBackupTests(unittest.TestCase):
         self.assertIn('EXPECTED=/data/backup-yang-baseline/20260913-120000', script)
         self.assertIn('[ "$LATEST" != "$EXPECTED" ]', script)
         self.assertIn("-name '20??????-??????*'", script)
-        self.assertIn('(cd "$LATEST" && sha256sum -c SHA256SUMS)', script)
-        self.assertIn('sysrepocfg --copy-from="$LATEST/running.xml" --datastore=running --format=xml', script)
+        self.assertIn('(cd "$EXPECTED" && sha256sum -c SHA256SUMS)', script)
+        self.assertIn('sysrepocfg --copy-from="$EXPECTED/running.xml" --datastore=running --format=xml', script)
         for service in system_backup.STOP_SERVICES:
             self.assertIn('stop_one %s' % service, script)
         for service in system_backup.START_SERVICES:
