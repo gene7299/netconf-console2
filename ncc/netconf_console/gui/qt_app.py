@@ -7316,9 +7316,19 @@ class QtMainWindow(QMainWindow):
 
     def show_error(self, exc):
         text = redact_secrets(str(exc))
-        self.status_label.setText("操作失敗：" + text[:300])
+        summary = text.splitlines()[0] if text.splitlines() else text
+        self.status_label.setText("操作失敗：" + summary[:300])
         if not self.closed and not self._close_requested:
-            QMessageBox.critical(self, "NETCONF", text)
+            details = redact_secrets(str(getattr(exc, "auth_details", "")))
+            if details:
+                dialog = _QtMessageBox(self)
+                dialog.setIcon(_QtMessageBox.Icon.Critical)
+                dialog.setWindowTitle(tr("SSH 認證失敗"))
+                dialog.setText(text)
+                dialog.setDetailedText(details)
+                dialog.exec()
+            else:
+                QMessageBox.critical(self, "NETCONF", text)
 
     def _sync_controls(self):
         connected = bool(self.client.connected)
