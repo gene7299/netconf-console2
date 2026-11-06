@@ -86,7 +86,17 @@ class ExportTests(unittest.TestCase):
                 export_tree(shell, timeout=timeout)
         with self.assertRaises(EditError):
             export_tree(shell, datastore="running; id")
+        with self.assertRaises(EditError):
+            export_tree(shell, datastore="operational", module="o-ran-sync; id")
         shell.run.assert_not_called()
+
+    def test_module_export_is_a_single_readonly_command(self):
+        shell = Mock()
+        shell.run.return_value = (b'', b'')
+        export_tree(shell, "operational", defaults_mode="report-all", module="o-ran-sync")
+        shell.run.assert_called_once_with(
+            'sysrepocfg --export --datastore operational --format xml --timeout 10 --defaults report-all --module o-ran-sync',
+            timeout=20)
 
     def test_reject_non_xml_and_unsafe_xml(self):
         for raw in (b'not XML', b'<x/> trailing garbage',

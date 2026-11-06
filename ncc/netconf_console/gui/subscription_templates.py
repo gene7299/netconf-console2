@@ -6,7 +6,6 @@ support. Runtime schema discovery can supply a different module revision.
 from functools import lru_cache
 from itertools import product
 from importlib.resources import files
-from decimal import Decimal, InvalidOperation
 import json
 import math
 import re
@@ -14,6 +13,7 @@ import re
 from lxml import etree
 
 from .model import EditError
+from ..yang_decimal import Decimal64Error, Decimal64Rules, decimal_rules
 
 MAX_BRANCHES = 128
 
@@ -25,6 +25,7 @@ def _text(stmt, keyword, default=""):
 
 def _type_details(stmt):
     typ = stmt.search_one("type")
+    original_spec = getattr(typ, "i_type_spec", None)
     original = typ.arg if typ is not None else "unknown"
     seen = set()
     constraints = {}
@@ -51,6 +52,9 @@ def _type_details(stmt):
                       if _text(s, "status") != "obsolete"]
         elif name == "boolean":
             values = ["true", "false"]
+        rules = decimal_rules(original_spec)
+        if rules is not None:
+            constraints.update(rules.constraints())
         return original, name, values, constraints
     return original, original, [], constraints
 
@@ -133,13 +137,9 @@ def validate_value(field, value):
         raise EditError(name + "：需符合 length " + constraints["length"])
     if base == "decimal64":
         try:
-            fraction = int(constraints.get("fraction-digits", "18"))
-            number = Decimal(value)
-            scaled = number * 10**fraction
-            if not re.fullmatch(r"[+-]?[0-9]+(?:\.[0-9]+)?", value) or not number.is_finite() or scaled != scaled.to_integral_value() or not -2**63 <= scaled <= 2**63-1:
-                raise ValueError()
-        except (ValueError, InvalidOperation):
-            raise EditError(name + "：需符合 decimal64，最多 %s 位小數。" % constraints.get("fraction-digits", "18")) from None
+            Decimal64Rules.from_constraints(constraints).validate(value, name)
+        except Decimal64Error as exc:
+            raise EditError(str(exc)) from None
     if "date-and-time" in field["type"]:
         from .events import timestamp
         timestamp(value)

@@ -102,7 +102,7 @@ class PreparedRpc:
         return children(self.rpc)[0].findtext("{%s}stream" % NOTIFICATION_NS) or "NETCONF"
 
 
-def prepare(text):
+def prepare(text, schema=None):
     root = parse_xml(text)
     name = etree.QName(root).localname
     if name == "rpc":
@@ -125,6 +125,8 @@ def prepare(text):
         raise EditError("RPC operation 必須指定 namespace。")
     if root.get("message-id") is None:
         root.set("message-id", "gui-rpc-" + uuid.uuid4().hex)
+    from .decimal_validation import validate_rpc_decimals
+    validate_rpc_decimals(root, schema)
     return PreparedRpc(root, to_xml(root), operation.tag)
 
 
@@ -152,4 +154,6 @@ def execute(client, manager, prepared):
         raise EditError("限時提交尚未結束，不能送出自訂 RPC。")
     if to_xml(prepared.rpc) != prepared.wire_xml:
         raise EditError("RPC 與預覽不同，請重新產生預覽。")
+    from .decimal_validation import validate_rpc_decimals
+    validate_rpc_decimals(prepared.rpc, getattr(client, "schema", None))
     return manager.xrpc(deepcopy(prepared.rpc)).xml

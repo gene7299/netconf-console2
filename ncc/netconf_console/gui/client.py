@@ -10,7 +10,8 @@ from urllib.parse import parse_qs, urlsplit
 from lxml import etree
 
 from ..session import ConnectionSettings, ConsoleContext
-from .model import EditError, EditPlan, Selection, children, identity, semantic
+from .model import EditError, EditPlan, Selection, children, identity, typed_semantic
+from .operational import read_operational
 from .schema import SchemaIndex, load_device_schemas
 
 
@@ -27,6 +28,24 @@ class Snapshot:
     options: ReadOptions
     defaults_mode: str | None = None
     warnings: list[str] = field(default_factory=list)
+    state_failures: dict[str, str] = field(default_factory=dict)
+    value_errors: dict[tuple[str, ...], str] = field(default_factory=dict)
+
+    def replace_root(self, part, root_tag):
+        data = deepcopy(self.data)
+        positions = [i for i, node in enumerate(data) if node.tag == root_tag]
+        position = positions[0] if positions else len(data)
+        for node in list(data):
+            if node.tag == root_tag:
+                data.remove(node)
+        for node in reversed(children(part.data)):
+            data.insert(position, deepcopy(node))
+        failures = {tag: detail for tag, detail in self.state_failures.items() if tag != root_tag}
+        failures.update(part.state_failures)
+        warnings = list(dict.fromkeys(self.warnings + part.warnings))
+        errors = {path: detail for path, detail in self.value_errors.items() if path[0] != root_tag}
+        errors.update(part.value_errors)
+        return Snapshot(data, part.options, part.defaults_mode, warnings, failures, errors)
 
 
 @dataclass
@@ -73,7 +92,7 @@ def config_semantic(node, path, schema):
     if info is None or info.config is not True:
         return None
     if info.kind in {"leaf", "leaf-list"}:
-        return semantic(node)
+        return typed_semantic(node, schema, path)
     values = [config_semantic(child, path + (child.tag,), schema) for child in children(node)]
     return node.tag, tuple(value for value in values if value is not None)
 
@@ -150,7 +169,7 @@ class GuiClient:
         )
         return self.schema
 
-    def read(self, options: ReadOptions, root_tag=None) -> Snapshot:
+    def read(self, options: ReadOptions, root_tag=None, progress=lambda _text: None) -> Snapshot:
         if options.source not in {"running", "candidate", "startup"}:
             raise EditError("Unsupported source datastore.")
         if options.state and options.source != "running":
@@ -159,12 +178,25 @@ class GuiClient:
             if options.source == source and not any(capability in c for c in self.capabilities):
                 raise EditError("Server does not advertise " + source)
         mode, warnings = defaults_mode(self.capabilities, options.defaults)
+        from .decimal_validation import decimal_diagnostics
         query_filter = ("subtree", etree.Element(root_tag)) if root_tag else None
         if options.state:
-            reply = self.manager.get_ncc(filter=query_filter, defaults=mode)
+            def read_state(_module, tags):
+                selected = ([etree.Element(tag) for tag in tags] if tags else query_filter)
+                return self.manager.get_ncc(filter=selected, defaults=mode).data
+
+            result = read_operational(
+                read_state,
+                lambda: self.manager.get_config_ncc(
+                    source=options.source, filter=query_filter, defaults=mode).data,
+                self.schema, root_tag, progress, self.cancel.is_set)
+            return Snapshot(result.data, options, mode,
+                            warnings + result.warnings, result.state_failures,
+                            decimal_diagnostics(result.data, self.schema))
         else:
             reply = self.manager.get_config_ncc(source=options.source, filter=query_filter, defaults=mode)
-        return Snapshot(deepcopy(reply.data), options, mode, warnings)
+        data = deepcopy(reply.data)
+        return Snapshot(data, options, mode, warnings, value_errors=decimal_diagnostics(data, self.schema))
 
     def apply(self, selection: Selection, plan: EditPlan, options: ReadOptions) -> ApplyResult:
         if self.pending_commit is not None:
@@ -179,6 +211,8 @@ class GuiClient:
         from ncclient.xml_ import to_xml
         if to_xml(plan.rpc) != plan.wire_xml:
             raise EditError("Outgoing XML changed since preview; regenerate it before sending.")
+        from .decimal_validation import validate_rpc_decimals
+        validate_rpc_decimals(plan.rpc, self.schema)
         target = plan.rpc.find("{urn:ietf:params:xml:ns:netconf:base:1.0}edit-config/{urn:ietf:params:xml:ns:netconf:base:1.0}target")
         if target is None or len(target) != 1 or etree.QName(target[0]).localname != options.source:
             raise EditError("Preview target differs from the source snapshot; reload before sending.")

@@ -3,6 +3,7 @@
 import os
 import time
 import unittest
+from copy import deepcopy
 from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
@@ -35,6 +36,177 @@ class QtWorkspaceTests(unittest.TestCase):
     def tearDown(self):
         self.window.close()
         self.app.processEvents()
+
+    def _select_interface_leaf(self, name="eth1", leaf="enabled", sysrepo=False):
+        window = self.window
+        tree = window.sysrepo_tree.tree if sysrepo else window.tree
+        expand = window.sysrepo_tree.expand if sysrepo else window._item_expanded
+        root = tree.topLevelItem(0)
+        expand(root)
+        root.setExpanded(True)
+        interface = next(root.child(index) for index in range(root.childCount())
+                         if hasattr(root.child(index).data(0, Qt.ItemDataRole.UserRole), "node")
+                         and root.child(index).data(0, Qt.ItemDataRole.UserRole).node.findtext(
+                             "{urn:ietf:params:xml:ns:yang:ietf-interfaces}name") == name)
+        expand(interface)
+        interface.setExpanded(True)
+        item = next(interface.child(index) for index in range(interface.childCount())
+                    if hasattr(interface.child(index).data(0, Qt.ItemDataRole.UserRole), "node")
+                    and interface.child(index).data(0, Qt.ItemDataRole.UserRole).node.tag.endswith("}" + leaf))
+        tree.setCurrentItem(item)
+        selection = item.data(0, Qt.ItemDataRole.UserRole)
+        if sysrepo:
+            window._show_sysrepo_selection(selection)
+        else:
+            window._show_selection(selection, item)
+        return item
+
+    def _synchronous_jobs(self):
+        self.window._run = lambda _label, work, done, failed=None: done(work(lambda _message: None))
+
+    def test_refresh_selected_keeps_keyed_leaf_after_server_reorders_list(self):
+        window = self.window
+        self._synchronous_jobs()
+        item = self._select_interface_leaf()
+        old_node = window.selection.node
+        current = window.client.data[0][1]
+        current.find("{urn:ietf:params:xml:ns:yang:ietf-interfaces}enabled").text = "false"
+        window.client.data[0].insert(0, current)
+        window.refresh_selected()
+        self.assertIsNot(window.selection.node, old_node)
+        self.assertEqual(window.selection.node.text, "false")
+        self.assertEqual(window.selection.ancestors[-1].findtext(
+            "{urn:ietf:params:xml:ns:yang:ietf-interfaces}name"), "eth1")
+        self.assertIn(">false<", window.editor.toPlainText())
+        self.assertIs(window.tree.currentItem().data(0, Qt.ItemDataRole.UserRole), window.selection)
+        self.assertTrue(window.tree.currentItem().parent().isExpanded())
+
+    def test_refresh_retains_expanded_descendants_below_collapsed_sibling(self):
+        window = self.window
+        self._synchronous_jobs()
+        selected = self._select_interface_leaf()
+        root = selected.parent().parent()
+        sibling = root.child(0)
+        window._item_expanded(sibling)
+        sibling.setExpanded(True)
+        reference = next(sibling.child(i) for i in range(sibling.childCount())
+                         if hasattr(sibling.child(i).data(0, Qt.ItemDataRole.UserRole), "node")
+                         and sibling.child(i).data(0, Qt.ItemDataRole.UserRole).node.tag.endswith("}port-reference"))
+        reference.setExpanded(True)
+        sibling.setExpanded(False)
+        window.refresh_selected()
+        sibling = window.tree.topLevelItem(0).child(0)
+        self.assertFalse(sibling.isExpanded())
+        reference = next(sibling.child(i) for i in range(sibling.childCount())
+                         if hasattr(sibling.child(i).data(0, Qt.ItemDataRole.UserRole), "node")
+                         and sibling.child(i).data(0, Qt.ItemDataRole.UserRole).node.tag.endswith("}port-reference"))
+        self.assertTrue(reference.isExpanded())
+
+    def test_refresh_retains_xml_and_tree_scroll_positions(self):
+        window = self.window
+        self._synchronous_jobs()
+        for index in range(40):
+            interface = deepcopy(window.client.data[0][0])
+            interface.find("{urn:ietf:params:xml:ns:yang:ietf-interfaces}name").text = "eth%d" % (100 + index)
+            window.client.data[0].append(interface)
+        window._accept_snapshot(window.client.read(window._options()))
+        window.show()
+        window.tree.topLevelItem(0).setExpanded(True)
+        self.app.processEvents()
+        window.editor.verticalScrollBar().setValue(20)
+        window.tree.verticalScrollBar().setValue(15)
+        self.assertGreater(window.editor.verticalScrollBar().value(), 0)
+        self.assertGreater(window.tree.verticalScrollBar().value(), 0)
+        before = (window.editor.verticalScrollBar().value(), window.tree.verticalScrollBar().value())
+        window.refresh_selected()
+        self.app.processEvents()
+        self.assertEqual((window.editor.verticalScrollBar().value(), window.tree.verticalScrollBar().value()), before)
+
+    def test_refresh_removed_list_instance_selects_its_parent_not_another_instance(self):
+        window = self.window
+        self._synchronous_jobs()
+        self._select_interface_leaf()
+        window.client.data[0].remove(window.client.data[0][1])
+        window.refresh_selected()
+        self.assertEqual(len(window.selection.path), 1)
+        self.assertTrue(window.selection.node.tag.endswith("}interfaces"))
+        self.assertIn("最近可用節點", window.status_label.text())
+        self.assertNotIn("eth1", window.editor.toPlainText())
+
+    def test_read_all_keeps_selection_when_refreshed_value_no_longer_matches_search(self):
+        window = self.window
+        self._synchronous_jobs()
+        self._select_interface_leaf(leaf="description")
+        window.tree_search.setText("Fronthaul")
+        window.client.data[0][1].find("{urn:ietf:params:xml:ns:yang:ietf-interfaces}description").text = "updated-description"
+        window.read_all()
+        self.assertEqual(window.tree_search.text(), "Fronthaul")
+        self.assertEqual(window.selection.node.text, "updated-description")
+        self.assertIs(window.tree.currentItem().data(0, Qt.ItemDataRole.UserRole), window.selection)
+        self.assertIn("updated-description", window.editor.toPlainText())
+
+    def test_refresh_preserves_unsent_draft_while_showing_fresh_server_xml(self):
+        window = self.window
+        self._synchronous_jobs()
+        self._select_interface_leaf(leaf="description")
+        window.editor.setPlainText(window.editor.toPlainText().replace("Fronthaul", "unsent-draft"))
+        window.client.data[0][1].find("{urn:ietf:params:xml:ns:yang:ietf-interfaces}description").text = "server-value"
+        window.refresh_selected()
+        self.assertIn("server-value", window.editor.toPlainText())
+        self.assertEqual(len(window.drafts.entries), 1)
+        entry = next(iter(window.drafts.entries.values()))
+        self.assertIn("unsent-draft", entry.text)
+        window._capture_draft()
+        self.assertIn(entry.key, window.drafts.entries)
+        window.revert()
+        self.assertNotIn(entry.key, window.drafts.entries)
+
+    def test_refresh_does_not_replace_xml_when_the_draft_cannot_be_saved(self):
+        window = self.window
+        self._select_interface_leaf(leaf="description")
+        window.client.schema.complete = False
+        window.editor.setPlainText(window.editor.toPlainText().replace("Fronthaul", "unsaved-draft"))
+        original = window.editor.toPlainText()
+        with patch.object(window, "_run") as job, patch.object(window, "show_error") as error:
+            window.refresh_selected()
+            job.assert_not_called()
+            error.assert_called_once()
+        self.assertEqual(window.editor.toPlainText(), original)
+
+    def test_refresh_keeps_latest_navigation_and_merges_the_original_query_root(self):
+        window = self.window
+        self._select_interface_leaf()
+        jobs = []
+        window._run = lambda _label, work, done, failed=None: jobs.append((work, done))
+        window.refresh_selected()
+        hardware = window.tree.topLevelItem(1)
+        window.tree.setCurrentItem(hardware)
+        window._show_selection(hardware.data(0, Qt.ItemDataRole.UserRole), hardware)
+        jobs[0][1](jobs[0][0](lambda _message: None))
+        self.assertEqual(len(window.snapshot.data), 2)
+        self.assertTrue(window.selection.node.tag.endswith("}hardware"))
+
+    def test_sysrepo_refresh_keeps_selected_xml_and_saved_netconf_workspace(self):
+        window = self._sysrepo_connection_fixture()
+        original = window.editor.toPlainText()
+        with patch("netconf_console.gui.sysrepo.export_tree", return_value=(window.snapshot.data, "")):
+            window.read_sysrepo_tree()
+        window.data_tree_tabs.setCurrentIndex(1)
+        self._select_interface_leaf(sysrepo=True)
+        updated = deepcopy(window.sysrepo_tree.data)
+        current = updated[0][1]
+        current.find("{urn:ietf:params:xml:ns:yang:ietf-interfaces}enabled").text = "false"
+        updated[0].insert(0, current)
+        with patch("netconf_console.gui.sysrepo.export_tree", return_value=(updated, "")):
+            window.refresh_selected()
+        self.assertEqual(window.sysrepo_selection.node.text, "false")
+        self.assertEqual(window.sysrepo_selection.ancestors[-1].findtext(
+            "{urn:ietf:params:xml:ns:yang:ietf-interfaces}name"), "eth1")
+        self.assertIs(window.sysrepo_tree.tree.currentItem().data(0, Qt.ItemDataRole.UserRole), window.sysrepo_selection)
+        self.assertTrue(window.editor.isReadOnly())
+        self.assertIn(">false<", window.editor.toPlainText())
+        window.data_tree_tabs.setCurrentIndex(0)
+        self.assertEqual(window.editor.toPlainText(), original)
 
     def test_relayout_defaults_and_demo_tree(self):
         self.assertEqual(self.window.source_box.currentText(), "running")
@@ -72,6 +244,51 @@ class QtWorkspaceTests(unittest.TestCase):
         self.assertEqual(page.progress.value(), 50)
         page.runner = None
         page.active = False
+
+    def test_epe_decimal_bounds_follow_the_loaded_leaf_schema(self):
+        window = self.window
+        window.client.schema = SchemaIndex.compile({"pm": '''module pm {yang-version 1.1;
+            namespace "urn:o-ran:performance-management:1.0";prefix pm;
+            container performance-measurement-objects {list epe-measurement-objects {
+                key "measurement-object";leaf measurement-object {type string;}
+                leaf lower-bound {type decimal64 {fraction-digits 2;range "0..2";}}
+                leaf upper-bound {type decimal64 {fraction-digits 2;range "0..2";}}
+            }}}'''})
+        self.assertTrue(window.client.schema.complete)
+        window.epe_reports["FREQUENCY_TABLE"].setChecked(True)
+        with patch.object(window, "show_error") as error:
+            for lower, upper in (("0.123", "1.00"), ("-0.01", "1.00"), ("0.10", "2.01"), ("1e-1", "1.00")):
+                error.reset_mock()
+                window.epe_lower_bound.setText(lower)
+                window.epe_upper_bound.setText(upper)
+                window._load_epe_config_rpc()
+                error.assert_called_once()
+            error.reset_mock()
+            window.epe_lower_bound.setText("0.12")
+            window.epe_upper_bound.setText("1.23")
+            window._load_epe_config_rpc()
+            error.assert_not_called()
+        self.assertIn("fraction-digits 2", window.epe_lower_bound.toolTip())
+        self.assertIn(">0.12<", window.rpc_editor.toPlainText())
+        self.assertIn(">1.23<", window.rpc_editor.toPlainText())
+
+    def test_invalid_received_decimal_displays_original_value_and_warning_in_both_trees(self):
+        from netconf_console.gui.client import ReadOptions, Snapshot
+        window = self.window
+        window.client.schema = SchemaIndex.compile({"gnss": '''module gnss {yang-version 1.1;
+          namespace "urn:gnss";prefix g;container location {config false;
+          leaf latitude {type decimal64 {fraction-digits 8;range "-90..90";}}}}'''})
+        data = etree.fromstring(b'<data><location xmlns="urn:gnss"><latitude>24.817353333333333</latitude></location></data>')
+        original = etree.tostring(data)
+        window._accept_snapshot(Snapshot(data, ReadOptions(state=True)))
+        self.assertFalse(window.read_warning.isHidden())
+        self.assertIn("decimal64", window.read_warning.text())
+        self.assertIn("24.817353333333333", window.editor.toPlainText())
+        window.sysrepo_tree.load(data, None, window.client.schema)
+        window.data_tree_tabs.setCurrentIndex(1)
+        self.assertFalse(window.read_warning.isHidden())
+        self.assertIn("24.817353333333333", window.read_warning.toolTip())
+        self.assertEqual(etree.tostring(data), original)
 
     def test_software_inventory_defaults_to_inactive_nonrunning_slot_and_skips_same_refresh(self):
         from netconf_console.gui.software import Inventory
@@ -171,6 +388,92 @@ class QtWorkspaceTests(unittest.TestCase):
             window.read_sysrepo_tree()
         self.assertEqual(set(window.sysrepo_tree.states.values()), {"unknown"})
         self.assertIn("未比較", window.status_label.text())
+
+    def test_sysrepo_provider_failure_recovers_readonly_tree_and_preserves_netconf_draft(self):
+        import shlex
+        from netconf_console.gui.client import ReadOptions
+        from netconf_console.gui.model import EditError
+
+        window = self._sysrepo_connection_fixture()
+        original = window.editor.toPlainText().replace("Fronthaul", "unsent-draft")
+        window.editor.setPlainText(original)
+        baseline = window.client.read(ReadOptions(defaults=True)).data
+        healthy = window.client.read(ReadOptions(defaults=True, state=True)).data
+        for node in list(healthy):
+            if not node.tag.endswith("}interfaces"):
+                healthy.remove(node)
+        commands = []
+
+        def run(command, timeout):
+            commands.append(command)
+            arguments = shlex.split(command)
+            source = arguments[arguments.index("--datastore") + 1]
+            if source == "running":
+                return b"".join(etree.tostring(node) for node in baseline), b""
+            module = arguments[arguments.index("--module") + 1] if "--module" in arguments else None
+            if module != "demo-interfaces":
+                raise EditError("系統 SSH 命令 exit=1; decimal64 fraction digits (8); User callback failed.")
+            return b"".join(etree.tostring(node) for node in healthy), b""
+
+        window.admin_connection.run.side_effect = run
+        window.sysrepo_source.setCurrentText("operational")
+        window.data_tree_tabs.setCurrentIndex(1)
+        with patch.object(window.client, "read") as comparison, patch.object(window, "show_error") as error:
+            window.read_sysrepo_tree()
+            comparison.assert_not_called()
+            error.assert_not_called()
+        self.assertIsNotNone(window.sysrepo_tree.data)
+        self.assertEqual(window.sysrepo_tree.data.findtext('.//{urn:ietf:params:xml:ns:yang:ietf-interfaces}oper-status'), "up")
+        self.assertIsNone(window.sysrepo_tree.data.find('.//{urn:ietf:params:xml:ns:yang:ietf-hardware}temperature'))
+        self.assertIn("{urn:ietf:params:xml:ns:yang:ietf-hardware}hardware", window.sysrepo_tree.state_failures)
+        self.assertFalse(window.read_warning.isHidden())
+        self.assertIn("demo-hardware", window.read_warning.text())
+        self.assertEqual(set(window.sysrepo_tree.states.values()), {"unknown"})
+        self.assertTrue(all("--export" in command and "--edit" not in command for command in commands))
+        self.assertTrue(any("--module demo-hardware" in command for command in commands))
+        window.data_tree_tabs.setCurrentIndex(0)
+        self.assertEqual(window.editor.toPlainText(), original)
+        self.assertTrue(window.read_warning.isHidden())
+
+    def test_partial_netconf_comparison_is_not_reported_as_missing_sysrepo_nodes(self):
+        from netconf_console.gui.client import ReadOptions, Snapshot
+        window = self._sysrepo_connection_fixture()
+        partial = Snapshot(etree.fromstring(b'<data/>'), ReadOptions(state=True),
+                           state_failures={"*": "User callback failed"})
+        with patch("netconf_console.gui.sysrepo.export_tree", return_value=(window.snapshot.data, "")), \
+                patch.object(window.client, "read", return_value=partial):
+            window.read_sysrepo_tree()
+        self.assertEqual(set(window.sysrepo_tree.states.values()), {"unknown"})
+        self.assertIn("不完整", window.status_label.text())
+
+    def test_partial_snapshot_warning_and_candidates_survive_switching_and_root_refresh(self):
+        from netconf_console.gui.client import ReadOptions, Snapshot
+        from netconf_console.gui.creation import candidates
+        window = self.window
+        partial = window.client.read(ReadOptions(defaults=True))
+        tag = partial.data[0].tag
+        partial.state_failures[tag] = "latitude decimal64 fraction digits (8); User callback failed."
+        window._accept_snapshot(partial)
+        self.assertFalse(window.read_warning.isHidden())
+        self.assertIn("latitude", window.tree.topLevelItem(0).toolTip(0))
+        parent = partial.data[0][0]
+        read_only = [candidate for candidate in candidates(window.client.schema, parent, (tag, parent.tag))
+                     if candidate.info.config is False]
+        self.assertTrue(read_only)
+        self.assertTrue(all(window._candidate_state_unavailable(candidate) for candidate in read_only))
+        window.data_tree_tabs.setCurrentIndex(1)
+        self.assertTrue(window.read_warning.isHidden())
+        window.data_tree_tabs.setCurrentIndex(0)
+        self.assertFalse(window.read_warning.isHidden())
+        # Refreshing a different root must retain the failed-root warning.
+        hardware = window.tree.topLevelItem(1).data(0, Qt.ItemDataRole.UserRole)
+        window._show_selection(hardware)
+        part = window.client.read(ReadOptions(defaults=True), hardware.node.tag)
+        window._replace_root(part)
+        self.assertIn(tag, window.snapshot.state_failures)
+        self.assertFalse(window.read_warning.isHidden())
+        window._accept_snapshot(window.client.read(ReadOptions(defaults=True)))
+        self.assertTrue(window.read_warning.isHidden())
 
     def test_sysrepo_different_device_skips_comparison_and_disconnect_clears(self):
         window = self._sysrepo_connection_fixture()

@@ -152,6 +152,7 @@ class SchemaIndex:
     complete: bool = True
     choices: dict[str, ChoiceInfo] = field(default_factory=dict)
     statements: dict = field(default_factory=dict, repr=False, compare=False)
+    value_statements: dict = field(default_factory=dict, repr=False, compare=False)
     modules: dict = field(default_factory=dict, repr=False, compare=False)
     content_hash: str = ""
 
@@ -309,6 +310,27 @@ class SchemaIndex:
                 continue
             for child in getattr(module, "i_children", []):
                 walk(child, ())
+        # RPC inputs and notification content-match fields carry types too.
+        # Keep them separate from writable DATA TREE node metadata.
+        def index_values(stmt, path):
+            if getattr(stmt, "i_not_implemented", False) or stmt.keyword == "output":
+                return
+            if stmt.keyword in {"choice", "case", "input"}:
+                for child in getattr(stmt, "i_children", []):
+                    index_values(child, path)
+                return
+            tag = qname(stmt)
+            if tag is None:
+                return
+            path += (tag,)
+            if stmt.keyword in {"leaf", "leaf-list"}:
+                result.value_statements[path] = stmt
+            for child in getattr(stmt, "i_children", []):
+                index_values(child, path)
+        for module in result.modules.values():
+            if implemented is None or module.arg in implemented:
+                for child in getattr(module, "i_children", []):
+                    index_values(child, ())
         return result
 
 

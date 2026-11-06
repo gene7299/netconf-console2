@@ -25,13 +25,13 @@ def schema_fingerprint(schema):
     return hashlib.sha256(json.dumps([schema.content_hash, body], sort_keys=True).encode()).hexdigest()
 
 
-def address(selection, schema):
+def address(selection, schema, canonical=True):
     chain = (*selection.ancestors, selection.node)
-    return tuple(identity(node, schema, selection.path[:i + 1]) for i, node in enumerate(chain))
+    return tuple(identity(node, schema, selection.path[:i + 1], canonical=canonical) for i, node in enumerate(chain))
 
 
-def draft_key(scope, source, selection, schema):
-    return hashlib.sha256(json.dumps([scope, source, address(selection, schema)]).encode()).hexdigest()
+def draft_key(scope, source, selection, schema, canonical=True):
+    return hashlib.sha256(json.dumps([scope, source, address(selection, schema, canonical)]).encode()).hexdigest()
 
 
 def selection_copy(selection, schema):
@@ -61,7 +61,15 @@ class DraftShelf:
         self.load_error = ""
 
     def matching(self, scope, source, selection, schema):
-        return self.entries.get(draft_key(scope, source, selection, schema))
+        exact = self.entries.get(draft_key(scope, source, selection, schema))
+        if exact:
+            return exact
+        # Older encrypted drafts used lexical decimal list identities. Match
+        # the stored selection against the current schema without losing them.
+        current = address(selection, schema)
+        return next((entry for entry in self.entries.values()
+                     if entry.scope == scope and entry.source == source
+                     and address(entry.selection, schema) == current), None)
 
     def overlapping(self, scope, source, selection, schema):
         entries = self.overlapping_entries(scope, source, selection, schema)
@@ -104,8 +112,12 @@ class DraftShelf:
         if conflict:
             raise EditError("與既有父／子範圍草稿重疊，請先開啟該草稿：" + conflict.label)
         key = draft_key(scope, source, selection, schema)
-        previous = self.entries.get(key)
+        previous = self.matching(scope, source, selection, schema)
         if previous:
+            if previous.key != key:
+                del self.entries[previous.key]
+                previous.key = key
+                self.entries[key] = previous
             if previous.text != text or previous.selection.delete != selection.delete:
                 previous.text = text
                 previous.selection = selection_copy(selection, schema)
@@ -124,7 +136,8 @@ class DraftShelf:
             raise EditError("設備／帳號／連線路徑或 source 與草稿不同，不能載入到此目標")
         if not schema.complete or schema_fingerprint(schema) != entry.schema_hash:
             raise EditError("YANG schema 與草稿不同或不完整，請核對 schema 後重建草稿")
-        if entry.key != draft_key(scope, source, entry.selection, schema):
+        if entry.key not in {draft_key(scope, source, entry.selection, schema),
+                             draft_key(scope, source, entry.selection, schema, canonical=False)}:
             raise EditError("草稿定位資訊不一致，請核對草稿檔")
         try:
             check_selection_current(data, entry.selection, schema)

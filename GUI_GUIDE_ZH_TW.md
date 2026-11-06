@@ -1,4 +1,57 @@
-# NETCONF Windows GUI 操作說明（3.14.2）
+# NETCONF Windows GUI 操作說明（3.14.5）
+
+## 重新讀取時保留目前檢視
+
+「重新讀取」與「重新讀取全部」會保留目前 DATA TREE 選取的節點、展開／折疊狀態
+與捲動位置，右側顯示該節點的新 XML。NETCONF 與 sysrepocfg 都適用。List 依 key
+定位，設備重新排序時仍保留同一筆資料；若節點已移除，會改選仍存在的最近上層，並提示。
+搜尋條件會保留，即使新值已不符合搜尋，仍顯示目前選取的節點。
+
+未送出的 XML 會先保存在「草稿清單」，不會自動送出；重新讀取後右側顯示設備最新內容。
+可從草稿清單重新比對／載入原草稿；若草稿無法保存，程式會保留目前 XML 並停止重新讀取。
+
+## decimal64 精度與範圍驗證
+
+已依 O-RAN.WG4.MP-YANGs-R003-v15.00 的 69 個 module 檢查展開後的 116 個
+decimal64 leaf（72 個資料樹欄位、44 個 notification 欄位）。各 leaf 分別有
+1、3、4、5、8 位小數限制；程式依對應 schema 的 typedef、leafref 與 range 驗證，
+包含繼承範圍、`min`/`max`、不連續範圍，以及 signed 64-bit 的底層數值限制。
+
+新增節點、表單與 XML 編輯、XML 匯入、notification content-match、自訂 RPC 及
+系統 sysrepocfg 修改均會檢查已知 decimal64 leaf。超位數（包含尾端補零）、超範圍、
+科學記號、NaN、Infinity 與空白會被拒絕，不會自動四捨五入或截斷。
+EPE 的 lower-bound/upper-bound 優先依 DUT 載入的 leaf schema；離線範本使用
+隨程式附帶的 v15.00 型別參考資料。收到的錯誤值會原樣保留並在 XML 上方提示，詳情
+列於「連線 / Schema 詳情」。數值等價的 `1.0`/`1.00` 不會造成重複項目或假衝突。
+
+這是已知型別的本機檢查；未知 schema、自訂 extension、must/when、NACM 與遠端服務
+仍由 NETCONF Server 驗證。CLI 原始 XML/RPC 保留透傳，不將 leaf 值轉成浮點數或
+套用猜測的小數限制；遠端 sysrepocfg 備份還原也由設備自己的 YANG 驗證。
+
+可重現完整 decimal64 檢查（需要原始 v15.00 YANG 資料夾）：
+
+```powershell
+python packaging/audit_decimal64.py --yang-directory "PATH_TO_V15" --report build/decimal64-v15-audit.json
+```
+
+報告包含各 leaf 的有效限制與測試結果。數值檢查採精確整數運算；XML 數字格式依據
+[RFC 7950 §9.3](https://www.rfc-editor.org/rfc/rfc7950.html#section-9.3)。
+
+## RU 狀態資料讀取失敗
+
+勾選「包含 config false（唯讀）」會讀取 RU 的 operational 資料。若 RU provider
+回報 `User callback failed`，例如 GNSS `latitude` 小數位數超過 YANG 的
+`fraction-digits 8`，GUI 會先讀取 running，再按 module 分別讀取狀態資料。
+正常模組仍可查看狀態；失敗模組僅顯示本次讀取的 running 設定，XML 上方顯示黃色提示，
+根節點的滑鼠提示與「連線 / Schema 詳情」保留原始錯誤。這些分次讀取的資料並非同一時刻的原子快照。
+
+NETCONF 與系統 SSH 的 sysrepocfg DATA TREE 都適用。未載入完整 schema 時，僅回退顯示
+running 並標示全部狀態未知。讀取不完整時不進行缺少節點的紅字比對；config false
+讀取失敗的節點也不會當成可新增項目。逾時、SSH 認證及 NETCONF 權限錯誤仍會正常顯示失敗。
+
+此功能讓其他資料仍可瀏覽；GNSS 緯度本身仍需在 RU provider 修正，例如將
+`24.817353333333333` 輸出為 `24.81735333`（最多 8 位小數），再重新讀取。
+GUI 不會自行改寫、四捨五入或補出 RU 未回傳的 operational 值，也不會自動送出修改。
 
 ## Software Update
 
@@ -431,7 +484,8 @@ DATA TREE 下的「草稿清單」顯示份數，也可從「工具」開啟，�
 - NETCONF 修改讀回相符後只移除已送出的那份草稿；讀回不同／失敗會保留並禁止直接重送。
   sysrepocfg 修改仍須另行重新讀取 NETCONF 確認。設備有其他本機草稿時，整份 datastore 的
   commit／discard／保存等寫入先停用，避免誤處理其他草稿；比較與 validate 不受此限制。
-- 「還原」或手動重新讀取目前編輯範圍時，確認放棄會刪除該範圍草稿；其他草稿不受影響。
+- 「還原」會刪除該範圍草稿；手動「重新讀取」則先保存草稿，再顯示設備最新 XML，
+  可從草稿清單重新比對／載入；其他草稿不受影響。
   加密保存失敗時請先匯出未保存 XML。無法解密的原檔不會覆寫；請先妥善保留原檔，
   關閉程式後將它移開，再重開程式建立新的草稿檔。
 
@@ -589,8 +643,8 @@ IP/port，Windows 防火牆也必須允許該 port；GUI 不會自動更改防�
   已在等待的 Call Home 會取消，握手可能仍要等 timeout。重試錯誤顯示於狀態列，
   不會每次跳出警告。
 - **不會自動重送 edit-config、commit 或 copy-config**。斷線時保留未送出的 XML；
-  重連完成後，必須先重新讀取確認設備狀態，才可送出修改。請先匯出要保留的草稿，
-  因為重新讀取會詢問是否放棄草稿。只更新 YANG 不算重新讀取設備資料。
+  重連完成後，必須先重新讀取確認設備狀態，才可送出修改。重新讀取前會先保存草稿，
+  之後可從草稿清單重新比對／載入。只更新 YANG 不算重新讀取設備資料。
 - 偵測依據是 SSH/TLS transport 的連線狀態；未加入額外心跳 RPC。網路無聲丟包
   可能要到 transport 偵測到斷線才重試，不保證立即偵測所有網路故障。
 
@@ -756,7 +810,7 @@ pyang 會處理 augment、uses、choice/case、submodule、feature 與 deviation
 尚未送出的編輯。不會額外連線或送出 RPC；如需最新完整資料，先按「重新讀取全部」。
 未讀取資料或忙碌時不能匯出；意外斷線但仍保有快照時可以匯出，並不代表設備即時狀態。
 匯出不是 edit-config RPC，也不會修改設備。XML 可能包含敏感設定，請妥善保管檔案。
-切換節點／來源／重新讀取時若有尚未送出的修改，會先詢問是否放棄。
+重新讀取前會先保存尚未送出的修改到草稿清單，再顯示設備最新 XML；保存失敗時會停止讀取。
 
 ## 右下：實際送出的 XML 與送出
 

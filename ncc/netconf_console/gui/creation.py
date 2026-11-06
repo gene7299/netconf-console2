@@ -177,6 +177,11 @@ def validate_scalar(schema, info, node):
     if spec is None:
         return  # Hand-built diagnostic schemas may not carry pyang statements.
     text = node.text or ""
+    from ..yang_decimal import decimal_members
+    if decimal_members(spec):
+        from .decimal_validation import validate_decimal_statement
+        validate_decimal_statement(stmt, text, "/" + "/".join(info.path))
+        return
     name = getattr(spec, "name", "")
     if name == "leafref":
         target = getattr(spec, "i_target_node", None)

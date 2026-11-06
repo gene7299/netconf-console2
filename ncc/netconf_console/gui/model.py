@@ -65,7 +65,29 @@ def semantic(node):
             tuple(semantic(child) for child in items))
 
 
-def identity(node, schema: SchemaIndex, path: tuple[str, ...]):
+def typed_value_identity(node, schema, path):
+    value, bindings = value_identity(node)
+    statement = schema.statements.get(path)
+    typ = statement.search_one("type") if statement is not None else None
+    from ..yang_decimal import Decimal64Error, decimal_rules, format_scaled
+    rules = decimal_rules(getattr(typ, "i_type_spec", None))
+    if rules is not None:
+        try:
+            return format_scaled(rules.validate(value), rules.fraction_digits), bindings
+        except Decimal64Error:
+            pass  # Preserve invalid received XML for diagnostics, not writes.
+    return value, bindings
+
+
+def typed_semantic(node, schema, path):
+    items = children(node)
+    text, bindings = typed_value_identity(node, schema, path)
+    return (node.tag, text if not items else (node.text or "").strip(), bindings,
+            tuple(sorted((key, value) for key, value in node.attrib.items() if key not in READ_ATTRIBUTES)),
+            tuple(typed_semantic(child, schema, path + (child.tag,)) for child in items))
+
+
+def identity(node, schema: SchemaIndex, path: tuple[str, ...], canonical=True):
     info = schema.lookup(path)
     if info and info.kind == "list":
         keys = []
@@ -73,10 +95,10 @@ def identity(node, schema: SchemaIndex, path: tuple[str, ...]):
             found = node.findall(tag)
             if len(found) != 1:
                 raise EditError("List %s requires exactly one key %s." % (local(node.tag), local(tag)))
-            keys.append(value_identity(found[0]))
+            keys.append(typed_value_identity(found[0], schema, path + (tag,)) if canonical else value_identity(found[0]))
         return node.tag, tuple(keys)
     if info and info.kind == "leaf-list":
-        return node.tag, value_identity(node)
+        return node.tag, typed_value_identity(node, schema, path) if canonical else value_identity(node)
     return (node.tag,)
 
 
@@ -121,7 +143,7 @@ def _copy_clean(node, deep=True):
     return result
 
 
-def _key_shell(node, info):
+def _key_shell(node, info, schema=None):
     result = _copy_clean(node, False)
     if info and info.kind == "list":
         if not info.keys:
@@ -130,6 +152,10 @@ def _key_shell(node, info):
             matches = node.findall(key)
             if len(matches) != 1:
                 raise EditError("Missing/duplicate list key: " + local(key))
+            if schema is not None:
+                from .decimal_validation import validate_decimal_statement
+                key_path = info.path + (key,)
+                validate_decimal_statement(schema.statements.get(key_path), matches[0].text or "", local(key))
             result.append(_copy_clean(matches[0]))
     return result
 
@@ -143,7 +169,7 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
         raise EditError("Keep the selected root name and namespace unchanged.")
     if target not in {"running", "candidate", "startup"}:
         raise EditError("Unsupported edit target.")
-    if not selection.delete and selection.exists and semantic(before) == semantic(edited):
+    if not selection.delete and selection.exists and typed_semantic(before, schema, selection.path) == typed_semantic(edited, schema, selection.path):
         return plan
     if not selection.exists and selection.ancestors:
         raise EditError("Only a root creation can use an absent baseline.")
@@ -192,13 +218,13 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
         return result
 
     def difference(old, new, path):
-        if old is not None and new is not None and semantic(old) == semantic(new):
+        if old is not None and new is not None and typed_semantic(old, schema, path) == typed_semantic(new, schema, path):
             return None
         node = new if new is not None else old
         info = require_writable(path)
         label = "/".join(map(local, path))
         if new is None:
-            output = _key_shell(old, info)
+            output = _key_shell(old, info, schema)
             if info.kind == "leaf-list":
                 output.text = old.text
             output.set("{%s}operation" % NC, "remove")
@@ -215,6 +241,8 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
             plan.changes.append("ADD " + label)
             return output
         if info.kind in {"leaf", "leaf-list"}:
+            from .creation import validate_scalar
+            validate_scalar(schema, info, new)
             plan.changed.add(new)
             output = _copy_clean(new)
             output.set("{%s}operation" % NC, "merge")
@@ -234,7 +262,7 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
                 new_order = [key for key in new_items if key[0] == tag]
                 if expected_order != new_order:
                     raise EditError("Reordering ordered-by user lists is not supported by this editor.")
-        output = _key_shell(new, info)
+        output = _key_shell(new, info, schema)
         key_tags = set(info.keys)
         count = 0
         for key in list(old_items) + [k for k in new_items if k not in old_items]:
@@ -258,14 +286,14 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
         # node is a top-level presence container or list instance.  Keeping a
         # key shell is enough to address a list; leaf-list values are retained
         # because NETCONF needs the value to identify the instance.
-        fragment = _key_shell(before, selected_info)
+        fragment = _key_shell(before, selected_info, schema)
         if selected_info.kind == "leaf-list":
             fragment.text = before.text
         fragment.set("{%s}operation" % NC, "remove")
         plan.changes.append("REMOVE " + "/".join(map(local, selection.path)))
         plan.removals += 1
     else:
-        if selected_info.kind == "leaf-list" and value_identity(before) != value_identity(edited):
+        if selected_info.kind == "leaf-list" and typed_value_identity(before, schema, selection.path) != typed_value_identity(edited, schema, selection.path):
             raise EditError("To change a leaf-list value, select its parent so the preview can remove the old value and add the new one.")
         if selected_info.kind == "list" and identity(before, schema, selection.path) != identity(edited, schema, selection.path):
             raise EditError("The selected list key cannot be changed in place.")
@@ -279,7 +307,7 @@ def build_plan(selection: Selection, text: str, schema: SchemaIndex, target="run
     for index in range(len(selection.ancestors) - 1, -1, -1):
         ancestor = selection.ancestors[index]
         info = require_writable(tuple(n.tag for n in selection.ancestors[:index + 1]))
-        wrapper = _key_shell(ancestor, info)
+        wrapper = _key_shell(ancestor, info, schema)
         wrapper.append(fragment)
         fragment = wrapper
     rpc = etree.Element("{%s}rpc" % NC, nsmap={"nc": NC},

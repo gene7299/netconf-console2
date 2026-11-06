@@ -60,6 +60,12 @@ def current_language():
 # Common GUI terms are kept as phrases so status messages containing values or
 # paths can also be translated without touching the value supplied by a user.
 _HANS_PHRASES = {
+    "無法保存目前 XML 草稿；請先匯出後再重新讀取。": "无法保存当前 XML 草稿；请先导出后再重新读取。",
+    "選取節點已移除或無法唯一定位；顯示最近可用節點。": "所选节点已移除或无法唯一定位；显示最近可用节点。",
+    "decimal64 值不符合 YANG；保留原值，詳見「連線 / Schema 詳情」。": "decimal64 值不符合 YANG；保留原值，详见「连接 / Schema 详情」。",
+    "狀態讀取不完整；失敗模組僅顯示 running 設定：": "状态读取不完整；失败模块仅显示 running 配置：",
+    "此模組狀態讀取失敗；僅顯示 running 設定。": "此模块状态读取失败；仅显示 running 配置。",
+    "詳見「連線 / Schema 詳情」。": "详见「连接 / Schema 详情」。",
     "繁體中文": "繁体中文", "簡體中文": "简体中文", "語言": "语言",
     "連線": "连接", "連線設定": "连接设置", "連線設定組": "连接设置组", "另存新組": "另存新组",
     "NETCONF連線": "NETCONF连接", "系統 SSH": "系统 SSH", "系統SSH": "系统SSH",
@@ -335,6 +341,15 @@ _EN_EXACT = {
 }
 
 _EN_PHRASES = {
+    "無法保存目前 XML 草稿；請先匯出後再重新讀取。": "The current XML draft could not be saved. Export it before refreshing.",
+    "選取節點已移除或無法唯一定位；顯示最近可用節點。": "The selected node was removed or is ambiguous; showing the nearest available node.",
+    "decimal64 值不符合 YANG；保留原值，詳見「連線 / Schema 詳情」。": "Received decimal64 values violate YANG; originals preserved. See Connection / Schema details.",
+    "decimal64 驗證失敗：": "decimal64 validation failures: ",
+    "狀態讀取不完整；失敗模組僅顯示 running 設定：": "State read incomplete; failed modules show running configuration only: ",
+    "此模組狀態讀取失敗；僅顯示 running 設定。": "State read failed for this module; showing running configuration only.",
+    "詳見「連線 / Schema 詳情」。": "See Connection / Schema details.",
+    "NETCONF 狀態讀取不完整；未比較。": "NETCONF state read incomplete; not compared.",
+    "狀態讀取不完整；未比較。": "State read incomplete; not compared.",
     "目前快照": "current snapshot", "不分大小寫": "case-insensitive", "搜尋": "Search",
     "新增 YANG 節點": "Add YANG node", "新增根 YANG 節點": "Add root YANG node",
     "新增子節點／list 項目": "Add child node / list item", "建立此候選節點": "Create this candidate node",

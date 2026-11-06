@@ -1287,7 +1287,8 @@ class NetconfWindow(WorkspaceFeatures):
             self.path_status.set("此查詢沒有可見資料（可能受 NACM 權限限制）")
         self.status.set(("DEMO · " if self.demo else "") + "已讀取 %s · %d 個根節點%s" % (
             snapshot.options.source, len(children(snapshot.data)), " + config false" if snapshot.options.state else "")
-            + (" · " + " ".join(snapshot.warnings) if snapshot.warnings else ""))
+            + (" · " + " ".join(snapshot.warnings) if snapshot.warnings else "")
+            + (" · decimal64 驗證失敗：%d" % len(snapshot.value_errors) if snapshot.value_errors else ""))
         self._refresh_creation_candidates()
 
     def _show_selection(self, iid):
@@ -1446,15 +1447,7 @@ class NetconfWindow(WorkspaceFeatures):
         options = self.snapshot.options
         bookmark = self._bookmark()
         def done(part):
-            data = deepcopy(self.snapshot.data)
-            indexes = [i for i, node in enumerate(data) if node.tag == root_tag]
-            position = indexes[0] if indexes else len(data)
-            for node in list(data):
-                if node.tag == root_tag:
-                    data.remove(node)
-            for node in reversed(children(part.data)):
-                data.insert(position, deepcopy(node))
-            self._accept_snapshot(Snapshot(data, options, part.defaults_mode, part.warnings), bookmark)
+            self._accept_snapshot(self.snapshot.replace_root(part, root_tag), bookmark)
         self._run("重新讀取所選節點…", lambda: self.client.read(options, root_tag), done)
 
     def _edited(self, _event=None):
@@ -1602,6 +1595,8 @@ class NetconfWindow(WorkspaceFeatures):
         lines = self.client.context.status_lines() if self.client.context is not None else ["Offline / Demo"]
         lines += ["", "YANG modules: %d" % self.client.schema.module_count,
                   "Schema complete: " + str(self.client.schema.complete), "", *self.client.schema.warnings]
+        if self.snapshot:
+            lines += ["", *self.snapshot.warnings, *self.snapshot.value_errors.values()]
         if self.client.connected and not self.demo:
             lines += ["", "Capabilities:", *self.client.capabilities]
         pane.set("\n".join(lines))

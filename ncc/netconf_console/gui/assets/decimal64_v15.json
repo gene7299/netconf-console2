@@ -1,0 +1,2426 @@
+{
+  "source": "O-RAN.WG4.MP-YANGs-R003-v15.00",
+  "modules": 69,
+  "source_files": [
+    {
+      "path": "Common Models/Interfaces/o-ran-ald-port.yang",
+      "sha256": "62bc94fd2ac62c79ffae789ce4a0efa5ce517dfc148b90a71a7580df21e7918c"
+    },
+    {
+      "path": "Common Models/Interfaces/o-ran-dhcp.yang",
+      "sha256": "70dfddde4731536c97db39f4eae3fa877b17e3ec4ada61afe1905b9ff096281c"
+    },
+    {
+      "path": "Common Models/Interfaces/o-ran-ethernet-forwarding.yang",
+      "sha256": "6141496c56dc0a249c83ca0e3a4550ac9413650649d8e0016f91f39878c512ab"
+    },
+    {
+      "path": "Common Models/Interfaces/o-ran-externalio.yang",
+      "sha256": "0e115f6d2c9ef70225b3eb199dc8fc13b7d68e7f69d722cb07f55af9c5f4a0ab"
+    },
+    {
+      "path": "Common Models/Interfaces/o-ran-interfaces.yang",
+      "sha256": "267d52f3f96b18c37da237759f1d6354e180f7e113ccadf83132563fc8f335b9"
+    },
+    {
+      "path": "Common Models/Interfaces/o-ran-mplane-int.yang",
+      "sha256": "4b287ec7d31e275a5fca806a8785c85efacfc156587417eab685eabc54c8679b"
+    },
+    {
+      "path": "Common Models/Interfaces/o-ran-transceiver.yang",
+      "sha256": "46d011e1b2935e847dd923adcd20fe2413231662bf491253b29da364f05a2994"
+    },
+    {
+      "path": "Common Models/Operations/o-ran-ald.yang",
+      "sha256": "ac083818b4a9f6d2b9906679c2ed5bd811e44813c1f1bd5a1601f2588871d182"
+    },
+    {
+      "path": "Common Models/Operations/o-ran-file-management.yang",
+      "sha256": "39f320e8375f890bf6c2e90a70f661b8688383717ee9f4cfb292981a66ba5eba"
+    },
+    {
+      "path": "Common Models/Operations/o-ran-operations.yang",
+      "sha256": "8e6badec60dab68bc9f4f43965572b3527685f5d9a0484f61a7ebf3e3bd7ffe9"
+    },
+    {
+      "path": "Common Models/Operations/o-ran-software-management.yang",
+      "sha256": "ad3ba46e0f4cfc38cf0c986c694839963324b7ae70600a66f2dcd856ced9d235"
+    },
+    {
+      "path": "Common Models/Operations/o-ran-trace.yang",
+      "sha256": "2d1be18edae8424ddb72530ed2e6356ec83bd13878cabb2887bdaf4340f9817e"
+    },
+    {
+      "path": "Common Models/Operations/o-ran-troubleshooting.yang",
+      "sha256": "6cdced3cd10be11b5e96d4e44ce49d6c74a1e3660e53b79450a9e9521d222228"
+    },
+    {
+      "path": "Common Models/Sync/o-ran-sync.yang",
+      "sha256": "6b47cdea83072759ba287f4f90f9566f2dc647eb50a5febc700902cd0d428ac3"
+    },
+    {
+      "path": "Common Models/System/o-ran-certificates.yang",
+      "sha256": "a6a4e88b3fcaa7596d9e9635df18d5fadb5bbdc702aacaaa78247e113c615552"
+    },
+    {
+      "path": "Common Models/System/o-ran-fan.yang",
+      "sha256": "d159ff50bd3dd67c0007817eb9d5b75d6506b094b875947e30c77bb993203418"
+    },
+    {
+      "path": "Common Models/System/o-ran-fm.yang",
+      "sha256": "a10ff2bf95a8d7189067a734f1ea337f8b5df8f6d66b63e20b0713b4acf1dcd9"
+    },
+    {
+      "path": "Common Models/System/o-ran-hardware.yang",
+      "sha256": "7d5b05e31e297efcb0f076bd154d23cc3ffc58d5bb487e0d444e0927d05e3d8e"
+    },
+    {
+      "path": "Common Models/System/o-ran-supervision.yang",
+      "sha256": "1a4f5ed017b1e0a9f419b63321d408e2981ea4ec65c2867d810e5a74e10f08d1"
+    },
+    {
+      "path": "Common Models/System/o-ran-usermgmt.yang",
+      "sha256": "f2488807ee8d589b2f47edd359af4b12a62be5af6991d6e06cd1ba42d705b75b"
+    },
+    {
+      "path": "Common Models/System/o-ran-ves-subscribed-notifications.yang",
+      "sha256": "c6019aaa7b6ebee4e7d392554f25deefe8f6a99a41efa9a2b2106df3b0ab6bc0"
+    },
+    {
+      "path": "Common Models/System/o-ran-wg4-features.yang",
+      "sha256": "6348267804f599252e677e6100d78eea9b86b92122d022e3048a7300b02b7ef6"
+    },
+    {
+      "path": "Cross-WG Common Models/o-ran-common-identity-refs.yang",
+      "sha256": "b6b26e0a27202c1de36cc01a4538c68613876253e1ec761da57528b0b1975ff8"
+    },
+    {
+      "path": "Cross-WG Common Models/o-ran-common-yang-types.yang",
+      "sha256": "e34b856f93c79a8eeb96f74c2e832d07f0e2e0eda9da84bfd2aed18d43fde52a"
+    },
+    {
+      "path": "Imported Models/iana-crypt-hash.yang",
+      "sha256": "fa9fde408ddec2c16bf2c6b9e4c2f80b813a2f9e48c127016f3fa96da346e02d"
+    },
+    {
+      "path": "Imported Models/iana-hardware.yang",
+      "sha256": "790ea3489e7c099c30a06efbef806dfa8483d61db1b8b41489f8cba355cdf897"
+    },
+    {
+      "path": "Imported Models/iana-if-type.yang",
+      "sha256": "32512ea1480f4c3f6b815c2b8354a206f70ad4dbdfd35658cb17c8f142c74fbb"
+    },
+    {
+      "path": "Imported Models/ieee802-dot1q-cfm-types.yang",
+      "sha256": "b707e2176dac3a1ba5f35114577f82bfe5181c576a7c21a74b5438cc9acfb97b"
+    },
+    {
+      "path": "Imported Models/ieee802-dot1q-cfm.yang",
+      "sha256": "b2d85afb56d36174db2f2b738d4be7dd482daca9b2e02b7dcbc9f2820b588dde"
+    },
+    {
+      "path": "Imported Models/ieee802-dot1q-types.yang",
+      "sha256": "10993df3f2ba335f70cd4f84164b2d5f0a336e9fd70c39c834f76c89fef71fd5"
+    },
+    {
+      "path": "Imported Models/ieee802-dot1x-types.yang",
+      "sha256": "7120fb6f025ae45378440d60e670969d01470fff3788a3d14b8f7a7ccb3f5a09"
+    },
+    {
+      "path": "Imported Models/ieee802-dot1x.yang",
+      "sha256": "6dd2180e6395f2d59763df7c85d003c7a887cf6034fd81f26abd5dea3e5a563b"
+    },
+    {
+      "path": "Imported Models/ieee802-types.yang",
+      "sha256": "50e65e0e96381b1d931e8b66efa4ec005d7450d0b0b6920f79a5de9f603153f8"
+    },
+    {
+      "path": "Imported Models/ietf-crypto-types.yang",
+      "sha256": "6ac3409c6d999735f103705c5222f53ad0f8516949754af70b297ffdd876aced"
+    },
+    {
+      "path": "Imported Models/ietf-datastores.yang",
+      "sha256": "4524d1fc78eab4cedf58f1feb284dd73a5a5b6d71cc3adbfae489d663fe93533"
+    },
+    {
+      "path": "Imported Models/ietf-dhcpv6-common.yang",
+      "sha256": "581f39c6b4f4997e93db1f7d3bc95ce322a94d07163be469f3395f7900f5cbe6"
+    },
+    {
+      "path": "Imported Models/ietf-dhcpv6-types.yang",
+      "sha256": "446894daec431accdaa0f100f4548d2c507f92eebbc6943acdc4b5956b3a274a"
+    },
+    {
+      "path": "Imported Models/ietf-hardware.yang",
+      "sha256": "3c27f4f153ad5e0f5554fb2dc937cff2fa24f203b732bdfb8dba0c6995f7c37a"
+    },
+    {
+      "path": "Imported Models/ietf-inet-types.yang",
+      "sha256": "236e6d4a4f768d3f02949ec3ec01ec4e01b60c545e93660fdbfc4be87faee5df"
+    },
+    {
+      "path": "Imported Models/ietf-interfaces.yang",
+      "sha256": "65e58e79b98dc76d82eea482bbe0de791e3fe97d96bb539fae0d9e466268966f"
+    },
+    {
+      "path": "Imported Models/ietf-ip.yang",
+      "sha256": "91546e6a54d0cce9dcc7fb3291bab5d13e2a587c6c100c63a5264602422eaaa5"
+    },
+    {
+      "path": "Imported Models/ietf-netconf-acm.yang",
+      "sha256": "81ad943ef9170b93a0dbbbe95ebf11307814a93101acebdc363f440b79eac98b"
+    },
+    {
+      "path": "Imported Models/ietf-netconf-monitoring.yang",
+      "sha256": "a2e1cf88aeb5fdb6ab47b48d7b10b17aab19e185dbb3edb414f8dde353a2f8bd"
+    },
+    {
+      "path": "Imported Models/ietf-netconf-notifications.yang",
+      "sha256": "d89e0faa6a78f23224267fac04117cf1a13d133be00094b1d1580298d65b04d3"
+    },
+    {
+      "path": "Imported Models/ietf-netconf.yang",
+      "sha256": "6c1d0b39e789b53ea13b7ea6703c2dcb199157a7b011ce30af4ca61b8ba9b13f"
+    },
+    {
+      "path": "Imported Models/ietf-network-instance.yang",
+      "sha256": "cc7ee9cc3faf6346f7012befe289b5676ac648813e09cd2eddf2b557fb7b8b30"
+    },
+    {
+      "path": "Imported Models/ietf-restconf.yang",
+      "sha256": "3f581a3be6c8996dcce6ab2b90d9faf1230e85a9b81cc7e12e3924c98d408cc8"
+    },
+    {
+      "path": "Imported Models/ietf-subscribed-notifications.yang",
+      "sha256": "b74d994e78eb2894c60ce4b152881ee18aefa902432081160c141bdbb12cd3c8"
+    },
+    {
+      "path": "Imported Models/ietf-system.yang",
+      "sha256": "8a692ee2521b4ffe87a88303a61a103879ee26bff050c1b05a2027ae23205d3f"
+    },
+    {
+      "path": "Imported Models/ietf-truststore.yang",
+      "sha256": "173871dddaba11faae1709c3335f9dcd800b95c255bb56b4c46666adac649916"
+    },
+    {
+      "path": "Imported Models/ietf-x509-cert-to-name.yang",
+      "sha256": "54440b401a64c6b42d5f07437dc686d4e4c876e69c901e98dce861e4281b5fef"
+    },
+    {
+      "path": "Imported Models/ietf-yang-library.yang",
+      "sha256": "7a6bf32286cdde14e679a6cfdf3e5f2b4503d1d1741257b583cc0d1965af54f7"
+    },
+    {
+      "path": "Imported Models/ietf-yang-schema-mount.yang",
+      "sha256": "e315c45642a78764df98c018bdc5dfdca1a31f20fe054a39edac52c32699f3b1"
+    },
+    {
+      "path": "Imported Models/ietf-yang-types.yang",
+      "sha256": "d27514d66f3af692fe98e0338b3a004d0abb8471bef63a34b981eface3932269"
+    },
+    {
+      "path": "RU Specific Models/Interfaces/o-ran-processing-element.yang",
+      "sha256": "1339d85bd84f1a03b2b507d66dd01a0379d4d8ce9843fc64b6053897c4426129"
+    },
+    {
+      "path": "RU Specific Models/Operations/o-ran-ecpri-delay.yang",
+      "sha256": "869e4de5061ea2871035de4fc7328517f2e6f80ac04f5685a94b2db4ecf6c432"
+    },
+    {
+      "path": "RU Specific Models/Operations/o-ran-ieee802-dot1q-cfm.yang",
+      "sha256": "703ebec2fb9d4c5e923b2415dcffe252364283e12c326ca7c779888025094696"
+    },
+    {
+      "path": "RU Specific Models/Operations/o-ran-lbm.yang",
+      "sha256": "522b8232745b47338e22e77b40fa47ffbabdce7296dbc44b597dcff52283ffbb"
+    },
+    {
+      "path": "RU Specific Models/Operations/o-ran-performance-management.yang",
+      "sha256": "db0cbff90f2a37d7c551d4f884953ed1fa93acefb996ee96ea2728ddde297630"
+    },
+    {
+      "path": "RU Specific Models/Operations/o-ran-udp-echo.yang",
+      "sha256": "61a73134e8439ab586af2612f942e9834a99f7b12f01b97cf2ac0c2012cedc43"
+    },
+    {
+      "path": "RU Specific Models/Operations/o-ran-uplane-conf.yang",
+      "sha256": "d6379e718b24227ee27450a8c51d19a300eab96d3cd9ceaf77935727e0ffc8d1"
+    },
+    {
+      "path": "RU Specific Models/Radio/o-ran-antenna-calibration.yang",
+      "sha256": "7ceedf77b2ec6a0d9080139e01da4480318b1f0d128900153be7efa3fcbc1827"
+    },
+    {
+      "path": "RU Specific Models/Radio/o-ran-beamforming.yang",
+      "sha256": "fce550ec196110f09e19c8b96292546e6c8c93dc8912a1f60da05e26161f6bbc"
+    },
+    {
+      "path": "RU Specific Models/Radio/o-ran-compression-factors.yang",
+      "sha256": "97317aea2b9f8a80b6bb7f42668ad23d71f735474a5dc305d702f4049685a817"
+    },
+    {
+      "path": "RU Specific Models/Radio/o-ran-delay-management.yang",
+      "sha256": "1d1d3eea84ba1682cb76c83346a4c972f840cec62ecb7e06bf0fa63c3f1012b2"
+    },
+    {
+      "path": "RU Specific Models/Radio/o-ran-laa-operations.yang",
+      "sha256": "7f132f9ad82629abbf885e570e3680523a284895e29daaa679948ff39038deba"
+    },
+    {
+      "path": "RU Specific Models/Radio/o-ran-laa.yang",
+      "sha256": "fb515c6d9666f9b27b3fd50444898bd19eed2c55b11f7c661cff43ced0734f49"
+    },
+    {
+      "path": "RU Specific Models/Radio/o-ran-module-cap.yang",
+      "sha256": "90c1492e7fc827140ea930ba30ad3f66d8bb3c21bc4b7c1022c0925a2f921218"
+    },
+    {
+      "path": "RU Specific Models/Radio/o-ran-shared-cell.yang",
+      "sha256": "12aba4c43f93cfdb66398707f75f4fdc8eaaafd6b441caff376f5e9aaa22cc6b"
+    }
+  ],
+  "leaves": [
+    {
+      "module": "o-ran-transceiver",
+      "path": [
+        "{urn:o-ran:transceiver:1.0}port-transceivers",
+        "{urn:o-ran:transceiver:1.0}port-transceiver-data",
+        "{urn:o-ran:transceiver:1.0}rx-power"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-transceiver.yang:599 (at o-ran-transceiver.yang:460)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-transceiver",
+      "path": [
+        "{urn:o-ran:transceiver:1.0}port-transceivers",
+        "{urn:o-ran:transceiver:1.0}port-transceiver-data",
+        "{urn:o-ran:transceiver:1.0}tx-power"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-transceiver.yang:599 (at o-ran-transceiver.yang:475)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-transceiver",
+      "path": [
+        "{urn:o-ran:transceiver:1.0}port-transceivers",
+        "{urn:o-ran:transceiver:1.0}port-transceiver-data",
+        "{urn:o-ran:transceiver:1.0}tx-bias-current"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-transceiver.yang:599 (at o-ran-transceiver.yang:487)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-transceiver",
+      "path": [
+        "{urn:o-ran:transceiver:1.0}port-transceivers",
+        "{urn:o-ran:transceiver:1.0}port-transceiver-data",
+        "{urn:o-ran:transceiver:1.0}voltage"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-transceiver.yang:599 (at o-ran-transceiver.yang:502)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-transceiver",
+      "path": [
+        "{urn:o-ran:transceiver:1.0}port-transceivers",
+        "{urn:o-ran:transceiver:1.0}port-transceiver-data",
+        "{urn:o-ran:transceiver:1.0}temperature"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-transceiver.yang:599 (at o-ran-transceiver.yang:514)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-transceiver",
+      "path": [
+        "{urn:o-ran:transceiver:1.0}port-transceivers",
+        "{urn:o-ran:transceiver:1.0}port-transceiver-data",
+        "{urn:o-ran:transceiver:1.0}additional-multi-lane-reporting",
+        "{urn:o-ran:transceiver:1.0}rx-power"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-transceiver.yang:599 (at o-ran-transceiver.yang:549)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-transceiver",
+      "path": [
+        "{urn:o-ran:transceiver:1.0}port-transceivers",
+        "{urn:o-ran:transceiver:1.0}port-transceiver-data",
+        "{urn:o-ran:transceiver:1.0}additional-multi-lane-reporting",
+        "{urn:o-ran:transceiver:1.0}tx-bias-current"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-transceiver.yang:599 (at o-ran-transceiver.yang:561)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-transceiver",
+      "path": [
+        "{urn:o-ran:transceiver:1.0}port-transceivers",
+        "{urn:o-ran:transceiver:1.0}port-transceiver-data",
+        "{urn:o-ran:transceiver:1.0}additional-multi-lane-reporting",
+        "{urn:o-ran:transceiver:1.0}tx-power"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-transceiver.yang:599 (at o-ran-transceiver.yang:573)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-sync",
+      "path": [
+        "{urn:o-ran:sync:1.0}sync",
+        "{urn:o-ran:sync:1.0}sync-status",
+        "{urn:o-ran:sync:1.0}time-error"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "3",
+        "range": "-9223372036854775.808..9223372036854775.807"
+      },
+      "source": "o-ran-sync.yang:1160 (at o-ran-sync.yang:251)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-sync",
+      "path": [
+        "{urn:o-ran:sync:1.0}sync",
+        "{urn:o-ran:sync:1.0}sync-status",
+        "{urn:o-ran:sync:1.0}frequency-error"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "3",
+        "range": "-9223372036854775.808..9223372036854775.807"
+      },
+      "source": "o-ran-sync.yang:1160 (at o-ran-sync.yang:261)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-sync",
+      "path": [
+        "{urn:o-ran:sync:1.0}sync",
+        "{urn:o-ran:sync:1.0}gnss-status",
+        "{urn:o-ran:sync:1.0}gnss-data",
+        "{urn:o-ran:sync:1.0}location",
+        "{urn:o-ran:sync:1.0}latitude"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "geographic-coordinate-degree",
+      "constraints": {
+        "fraction-digits": "8",
+        "range": "-90.0..90.0"
+      },
+      "source": "o-ran-sync.yang:1160 (at o-ran-sync.yang:1130)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-sync",
+      "path": [
+        "{urn:o-ran:sync:1.0}sync",
+        "{urn:o-ran:sync:1.0}gnss-status",
+        "{urn:o-ran:sync:1.0}gnss-data",
+        "{urn:o-ran:sync:1.0}location",
+        "{urn:o-ran:sync:1.0}longitude"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "geographic-coordinate-degree",
+      "constraints": {
+        "fraction-digits": "8",
+        "range": "-180.0..180.0"
+      },
+      "source": "o-ran-sync.yang:1160 (at o-ran-sync.yang:1137)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-sync",
+      "path": [
+        "{urn:o-ran:sync:1.0}sync",
+        "{urn:o-ran:sync:1.0}gnss-status",
+        "{urn:o-ran:sync:1.0}gnss-data",
+        "{urn:o-ran:sync:1.0}gnss-rx-time-error"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "3",
+        "range": "-9223372036854775.808..9223372036854775.807"
+      },
+      "source": "o-ran-sync.yang:1160 (at o-ran-sync.yang:1145)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}lower-bound"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1649)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}upper-bound"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1658)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:573)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:593)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}first",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:613)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}latest",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:633)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}lower-bound"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1989)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}upper-bound"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1996)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}min"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:466)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}max"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:474)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}average"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:481)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}min"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:509)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}max"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:517)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}average"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:524)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}per-symbol-index-result",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "1",
+        "range": "-922337203685477580.8..922337203685477580.7"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1097)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}per-symbol-index-result",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "1",
+        "range": "-922337203685477580.8..922337203685477580.7"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1112)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}per-symbol-index-result",
+        "{urn:o-ran:performance-management:1.0}avg",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "1",
+        "range": "-922337203685477580.8..922337203685477580.7"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1127)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}lower-bound"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:2162)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}upper-bound"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:2171)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}avg",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1181)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}std-deviation",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1194)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1208)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1231)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}first",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1254)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}latest",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1277)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}avg",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1181)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}std-deviation",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1194)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1208)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1231)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}first",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1254)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}performance-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-objects",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}latest",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2610 (at o-ran-performance-management.yang:1277)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:573)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:593)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}first",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:613)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}latest",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:633)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-stats",
+        "{urn:o-ran:performance-management:1.0}multiple-transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:573)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-stats",
+        "{urn:o-ran:performance-management:1.0}multiple-transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:593)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-stats",
+        "{urn:o-ran:performance-management:1.0}multiple-transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}first",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:613)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}transceiver-stats",
+        "{urn:o-ran:performance-management:1.0}multiple-transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}transceiver-measurement-result",
+        "{urn:o-ran:performance-management:1.0}latest",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:633)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-stats",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}min"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:466)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-stats",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}max"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:474)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-stats",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}average"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:481)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-stats",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}min"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:509)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-stats",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}max"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:517)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-stats",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}average"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:524)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}min"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:466)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}max"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:474)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}average"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:481)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}min"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:509)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}max"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:517)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}average"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:524)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}multiple-epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}min"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:466)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}multiple-epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}max"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:474)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}multiple-epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}average"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:481)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}multiple-epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}min"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:509)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}multiple-epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}max"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:517)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}epe-statistics",
+        "{urn:o-ran:performance-management:1.0}multiple-epe-measurement-result",
+        "{urn:o-ran:performance-management:1.0}epe-measurement-resultv2",
+        "{urn:o-ran:performance-management:1.0}average"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:524)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-stats",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}per-symbol-index-result",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "1",
+        "range": "-922337203685477580.8..922337203685477580.7"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1097)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-stats",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}per-symbol-index-result",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "1",
+        "range": "-922337203685477580.8..922337203685477580.7"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1112)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-stats",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}per-symbol-index-result",
+        "{urn:o-ran:performance-management:1.0}avg",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "1",
+        "range": "-922337203685477580.8..922337203685477580.7"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1127)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-stats",
+        "{urn:o-ran:performance-management:1.0}multiple-symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}per-symbol-index-result",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "1",
+        "range": "-922337203685477580.8..922337203685477580.7"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1097)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-stats",
+        "{urn:o-ran:performance-management:1.0}multiple-symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}per-symbol-index-result",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "1",
+        "range": "-922337203685477580.8..922337203685477580.7"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1112)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-stats",
+        "{urn:o-ran:performance-management:1.0}multiple-symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}symbol-rssi-measurement-result",
+        "{urn:o-ran:performance-management:1.0}per-symbol-index-result",
+        "{urn:o-ran:performance-management:1.0}avg",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "1",
+        "range": "-922337203685477580.8..922337203685477580.7"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1127)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}avg",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1181)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}std-deviation",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1194)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1208)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1231)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}first",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1254)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-array-element",
+        "{urn:o-ran:performance-management:1.0}latest",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1277)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}avg",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1181)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}std-deviation",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1194)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}min",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1208)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}max",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1231)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}first",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1254)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-performance-management",
+      "path": [
+        "{urn:o-ran:performance-management:1.0}measurement-result-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-stats",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result",
+        "{urn:o-ran:performance-management:1.0}tx-antenna-measurement-result-connector-band",
+        "{urn:o-ran:performance-management:1.0}latest",
+        "{urn:o-ran:performance-management:1.0}value"
+      ],
+      "scope": "notification",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-performance-management.yang:2619 (at o-ran-performance-management.yang:1277)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}static-low-level-tx-endpoints",
+        "{urn:o-ran:uplane-conf:1.0}supported-reference-level",
+        "{urn:o-ran:uplane-conf:1.0}min"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:3243)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}static-low-level-tx-endpoints",
+        "{urn:o-ran:uplane-conf:1.0}supported-reference-level",
+        "{urn:o-ran:uplane-conf:1.0}max"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:3253)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}low-level-rx-endpoints",
+        "{urn:o-ran:uplane-conf:1.0}eaxc-gain-correction"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:3731)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-array-carriers",
+        "{urn:o-ran:uplane-conf:1.0}gain"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:4079)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-array-carriers",
+        "{urn:o-ran:uplane-conf:1.0}reference-level"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:4131)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-array-carriers",
+        "{urn:o-ran:uplane-conf:1.0}gain-correction"
+      ],
+      "scope": "data",
+      "config": true,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:4249)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}horizontal-spacing"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "5",
+        "range": "-92233720368547.75808..92233720368547.75807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:901)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}vertical-spacing"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "5",
+        "range": "-92233720368547.75808..92233720368547.75807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:910)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}normal-vector-direction",
+        "{urn:o-ran:uplane-conf:1.0}azimuth-angle"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:923)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}normal-vector-direction",
+        "{urn:o-ran:uplane-conf:1.0}zenith-angle"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:931)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}leftmost-bottom-array-element-position",
+        "{urn:o-ran:uplane-conf:1.0}x"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:943)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}leftmost-bottom-array-element-position",
+        "{urn:o-ran:uplane-conf:1.0}y"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:952)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}leftmost-bottom-array-element-position",
+        "{urn:o-ran:uplane-conf:1.0}z"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:961)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}min-gain"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:4307)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}tx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}max-gain"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:4317)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}horizontal-spacing"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "5",
+        "range": "-92233720368547.75808..92233720368547.75807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:901)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}vertical-spacing"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "5",
+        "range": "-92233720368547.75808..92233720368547.75807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:910)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}normal-vector-direction",
+        "{urn:o-ran:uplane-conf:1.0}azimuth-angle"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:923)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}normal-vector-direction",
+        "{urn:o-ran:uplane-conf:1.0}zenith-angle"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:931)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}leftmost-bottom-array-element-position",
+        "{urn:o-ran:uplane-conf:1.0}x"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:943)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}leftmost-bottom-array-element-position",
+        "{urn:o-ran:uplane-conf:1.0}y"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:952)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}leftmost-bottom-array-element-position",
+        "{urn:o-ran:uplane-conf:1.0}z"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:961)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}gain-correction-range",
+        "{urn:o-ran:uplane-conf:1.0}max"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:4375)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-uplane-conf",
+      "path": [
+        "{urn:o-ran:uplane-conf:1.0}user-plane-configuration",
+        "{urn:o-ran:uplane-conf:1.0}rx-arrays",
+        "{urn:o-ran:uplane-conf:1.0}gain-correction-range",
+        "{urn:o-ran:uplane-conf:1.0}min"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-uplane-conf.yang:5052 (at o-ran-uplane-conf.yang:4383)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-module-cap",
+      "path": [
+        "{urn:o-ran:module-cap:1.0}module-capability",
+        "{urn:o-ran:module-cap:1.0}ru-capabilities",
+        "{urn:o-ran:module-cap:1.0}max-power-per-pa-antenna"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-module-cap.yang:1286 (at o-ran-module-cap.yang:692)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-module-cap",
+      "path": [
+        "{urn:o-ran:module-cap:1.0}module-capability",
+        "{urn:o-ran:module-cap:1.0}ru-capabilities",
+        "{urn:o-ran:module-cap:1.0}min-power-per-pa-antenna"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-module-cap.yang:1286 (at o-ran-module-cap.yang:704)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-module-cap",
+      "path": [
+        "{urn:o-ran:module-cap:1.0}module-capability",
+        "{urn:o-ran:module-cap:1.0}band-capabilities",
+        "{urn:o-ran:module-cap:1.0}max-power-per-antenna"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-module-cap.yang:1295 (at o-ran-module-cap.yang:1227)",
+      "branch": 0
+    },
+    {
+      "module": "o-ran-module-cap",
+      "path": [
+        "{urn:o-ran:module-cap:1.0}module-capability",
+        "{urn:o-ran:module-cap:1.0}band-capabilities",
+        "{urn:o-ran:module-cap:1.0}min-power-per-antenna"
+      ],
+      "scope": "data",
+      "config": false,
+      "type": "decimal64",
+      "constraints": {
+        "fraction-digits": "4",
+        "range": "-922337203685477.5808..922337203685477.5807"
+      },
+      "source": "o-ran-module-cap.yang:1295 (at o-ran-module-cap.yang:1239)",
+      "branch": 0
+    }
+  ]
+}

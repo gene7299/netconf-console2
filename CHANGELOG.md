@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Keep the selected DATA TREE instance and XML view after refresh (GUI 3.14.5).
+  Restore list/leaf-list identities, expanded/collapsed branches and scroll
+  positions in both NETCONF and sysrepocfg views. Fall back to a surviving
+  ancestor when an instance disappears and retain unsent local XML drafts.
+- Audit all 116 expanded decimal64 leaves in O-RAN MP-YANG v15.00 (69 modules).
+  Share exact scaled-integer validation across editors/imports, notification
+  filters, RPC XML and system-sysrepocfg writes; enforce each leaf's precision,
+  inherited/disjoint ranges and signed 64-bit limits without rounding. Use DUT
+  schema constraints for EPE bounds and a generated v15 reference offline.
+  Warn on invalid received values and compare equivalent numeric encodings
+  consistently for list identities, conflicts and readback (GUI 3.14.4).
+- Recover GUI DATA TREE reads when an RU operational callback fails (3.14.3),
+  including invalid GNSS decimal64 precision and uninitialized alarm providers.
+  Isolate modules for NETCONF and sysrepocfg, retain fresh running configuration
+  for failed modules, and mark state as incomplete with original diagnostics.
+  Do not infer absent nodes from failed reads or alter device values.
 - Add remote Sysrepo backup selection for restoring `running`. The GUI lists
   timestamped backups whose `running.xml` and SHA256 checksums are valid, then
   rechecks the selected backup before applying it (Qt GUI 3.14.2).

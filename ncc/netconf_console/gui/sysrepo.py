@@ -44,6 +44,8 @@ def prepare(plan, schema, program="sysrepocfg", timeout=10, defaults=False):
     config = op.find("{%s}config" % NC)
     if config is None or len(config) != 1 or op.findtext("{%s}default-operation" % NC) != "none":
         raise EditError("需要單一 module 根節點的最小變更預覽。")
+    from .decimal_validation import validate_rpc_decimals
+    validate_rpc_decimals(plan.rpc, schema)
     root = deepcopy(config[0])
     module = schema.namespaces.get(etree.QName(root).namespace, "")
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", module):
@@ -78,7 +80,7 @@ def parse_export(raw):
 
 
 def export_tree(shell, datastore="running", program="sysrepocfg", timeout=10,
-                defaults_mode="explicit"):
+                defaults_mode="explicit", module=None):
     """Read the entire datastore; never edit, import, lock or invoke sudo."""
     if not re.fullmatch(r"(?:/[A-Za-z0-9_.-]+)*/?sysrepocfg", program):
         raise EditError("僅接受 sysrepocfg 或以 / 開頭的 sysrepocfg 完整路徑。")
@@ -88,9 +90,14 @@ def export_tree(shell, datastore="running", program="sysrepocfg", timeout=10,
         raise EditError("不支援的 sysrepocfg default 模式。")
     if type(timeout) is not int or not 1 <= timeout <= 120:
         raise EditError("sysrepocfg timeout 需為 1–120 秒。")
-    command = shlex.join([program, "--export", "--datastore", datastore,
-                          "--format", "xml", "--timeout", str(timeout),
-                          "--defaults", defaults_mode])
+    if module is not None and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", module):
+        raise EditError("不合法的 sysrepocfg module 名稱。")
+    arguments = [program, "--export", "--datastore", datastore,
+                 "--format", "xml", "--timeout", str(timeout),
+                 "--defaults", defaults_mode]
+    if module is not None:
+        arguments.extend(["--module", module])
+    command = shlex.join(arguments)
     raw, stderr = shell.run(command, timeout=timeout + 10)
     data = parse_export(raw)
     if (data.text or "").strip() or any((node.tail or "").strip() for node in data):

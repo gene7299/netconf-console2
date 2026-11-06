@@ -7,7 +7,7 @@ from lxml import etree
 from ncclient.xml_ import to_xml
 
 from .client import ReadOptions
-from .model import EditError, NC, semantic
+from .model import EditError, NC, typed_semantic
 from .workspace import xml_diff
 
 OPERATIONS = {
@@ -51,6 +51,11 @@ def prepare(client, operation, source="running", confirm_timeout=120):
         origin = target = source
     mgr = client.manager
     baseline = {name: client.read(ReadOptions(name)).data for name in dict.fromkeys((origin, target))}
+    if operation not in {"compare", "validate"}:
+        from .decimal_validation import decimal_diagnostics
+        errors = decimal_diagnostics(baseline[origin], client.schema)
+        if errors:
+            raise EditError("來源 datastore 的 decimal64 不符合 YANG：\n" + "\n".join(errors.values()))
     rpc = etree.Element("{%s}rpc" % NC, nsmap={"nc": NC}, attrib={"message-id": "gui-" + uuid.uuid4().hex})
     name = {"save": "copy-config", "compare": "copy-config", "commit": "commit",
             "discard": "discard-changes", "validate": "validate", "confirmed": "commit"}[operation]
@@ -91,7 +96,7 @@ def execute(client, prepared):
                 locked.append(name)
         for name, baseline in prepared.baseline.items():
             current = client.read(ReadOptions(name)).data
-            if semantic(current) != semantic(baseline):
+            if typed_semantic(current, client.schema, ()) != typed_semantic(baseline, client.schema, ()):
                 raise EditError(name + " 已在預覽後改變；未送出操作，請重新比較。")
         if prepared.operation == "confirmed":
             from .safety import begin_pending
@@ -102,7 +107,7 @@ def execute(client, prepared):
         if prepared.operation != "validate":
             try:
                 actual = client.read(ReadOptions(prepared.target)).data
-                if semantic(actual) != semantic(prepared.baseline[prepared.source]):
+                if typed_semantic(actual, client.schema, ()) != typed_semantic(prepared.baseline[prepared.source], client.schema, ()):
                     warnings.append("RPC 成功，但讀回與來源有差異（可能為 server 正規化或存取權限）；請重新比較。")
             except Exception:
                 warnings.append("RPC 成功，但讀回失敗；結果待確認，不可直接重送。")

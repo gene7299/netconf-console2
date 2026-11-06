@@ -116,6 +116,9 @@ def import_selection(raw, selection, schema):
         raise EditError("只能匯入 config true 節點。")
 
     def clean(new, old, path):
+        if schema.lookup(path).kind in {"leaf", "leaf-list"}:
+            from .decimal_validation import validate_decimal_statement
+            validate_decimal_statement(schema.statements.get(path), new.text or "", instance_path(Selection(new), schema))
         result = deepcopy(new)
         for node in list(result):
             result.remove(node)

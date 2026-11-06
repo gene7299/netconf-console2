@@ -9,7 +9,7 @@ import tempfile
 
 from lxml import etree
 
-from .model import EditError, Selection, build_plan, children, identity, parse_editor, semantic
+from .model import EditError, Selection, build_plan, children, identity, parse_editor, typed_semantic
 from .preferences import _dpapi, encrypted_storage_scope
 from .workspace import import_selection, instance_path
 
@@ -84,7 +84,7 @@ def restore_choices(selection, backup_xml, schema, target):
     build_plan(selection, etree.tostring(imported).decode(), schema, target)
     changes = []
     def walk(old, new, path, ancestors, address):
-        if old is not None and new is not None and semantic(old) == semantic(new):
+        if old is not None and new is not None and typed_semantic(old, schema, path) == typed_semantic(new, schema, path):
             return
         info = schema.lookup(path)
         node = new if new is not None else old

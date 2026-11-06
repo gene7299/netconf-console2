@@ -18,7 +18,6 @@ from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import uuid
 
@@ -29,6 +28,8 @@ from ..trace import redact_secrets
 from ..xmloutput import serialize_xml
 from . import VERSION
 from .client import GuiClient, ReadOptions, Snapshot
+from .qt_tree_state import TreeState, address as tree_address, nearest_selection
+from .operational import read_operational
 from .disconnect import DisconnectBatch
 from .notification_badge import NotificationTabBar
 from .creation import (Candidate, Template, append_template, candidates, choice_label,
@@ -1117,6 +1118,8 @@ class QtMainWindow(QMainWindow):
         self.snapshot: Snapshot | None = None
         self.selection: Selection | None = None
         self.sysrepo_selection: Selection | None = None
+        self.sysrepo_read_warnings = []
+        self._refresh_preserved_drafts = set()
         self._saved_netconf_view = None
         self.baseline_text = ""
         self.plan = None
@@ -1174,6 +1177,7 @@ class QtMainWindow(QMainWindow):
         self.drafts = DraftShelf(self.preferences_store.path.parent / "gui-drafts.nccdrafts"
                                  if self.preferences_store else None)
         self.drafts.load()
+        self._refresh_preserved_drafts.update(self.drafts.entries)
         self.audit = AuditLog(
             persist=self.preferences_store is not None,
             path=self.preferences_store.path.parent / "gui-operations.json"
@@ -1963,6 +1967,11 @@ class QtMainWindow(QMainWindow):
         self.path_label = QLabel("請先連線，再選擇左側節點")
         self.path_label.setStyleSheet("color: #526679")
         editor_layout.addWidget(self.path_label)
+        self.read_warning = QLabel("")
+        self.read_warning.setWordWrap(True)
+        self.read_warning.setStyleSheet("color: #9a3412; background: #fff3cd; padding: 3px;")
+        self.read_warning.setVisible(False)
+        editor_layout.addWidget(self.read_warning)
         legend = QLabel("伺服器 default · 等於 schema default · config false · 修改中 · schema 未知")
         legend.setStyleSheet("color: #526679")
         editor_layout.addWidget(legend)
@@ -3312,6 +3321,8 @@ class QtMainWindow(QMainWindow):
         self.plan = None
         self.tree.clear()
         self.sysrepo_tree.clear()
+        self.sysrepo_read_warnings = []
+        self._update_read_warning()
         self.editor.clear()
         self.preview.clear()
         self.path_label.setText("未連線")
@@ -3320,6 +3331,9 @@ class QtMainWindow(QMainWindow):
         self.status_label.setText("已中斷連線")
 
     def read_all(self):
+        if self.data_tree_tabs.currentIndex() == 1:
+            self.read_sysrepo_tree()
+            return
         if not self.client.connected or self.busy or not self._rpc_allowed():
             return
         try:
@@ -3327,8 +3341,13 @@ class QtMainWindow(QMainWindow):
         except Exception as exc:
             self.show_error(exc)
             return
+        if not self._preserve_refresh_draft():
+            return
+        self.client.cancel.clear()
         self._run("讀取 %s%s…" % (options.source, " + state" if options.state else ""),
-                  lambda _progress: self.client.read(options), self._accept_snapshot)
+                  lambda _progress: self.client.read(options),
+                  lambda snapshot: self._accept_snapshot(snapshot, TreeState.capture(
+                      self.tree, self.client.schema, self.selection)))
 
     def refresh_schema(self):
         if not self.client.connected or self.busy or not self._rpc_allowed():
@@ -3343,7 +3362,8 @@ class QtMainWindow(QMainWindow):
             if self.sysrepo_tree.data is not None:
                 self.sysrepo_tree.load(
                     self.sysrepo_tree.data, self.sysrepo_tree.netconf_data, schema,
-                    self.tree_search.text(), self.checks["show_candidates"].isChecked())
+                    self.tree_search.text(), self.checks["show_candidates"].isChecked(),
+                    self.sysrepo_tree.state_failures)
                 if self.data_tree_tabs.currentIndex() == 1:
                     self._enter_sysrepo_tree_view()
             if schema.warnings:
@@ -3396,31 +3416,76 @@ class QtMainWindow(QMainWindow):
         options = ReadOptions("running" if export_source == "operational" else export_source,
                               include_defaults, export_source == "operational")
         schema = self.client.schema
+        self.client.cancel.clear()
 
         def work(_progress):
-            data, warning = export_tree(
-                shell, export_source, program, timeout,
-                "report-all" if include_defaults else "explicit")
+            warnings = []
+
+            def export(datastore, module=None):
+                kwargs = {"module": module} if module is not None else {}
+                data, warning = export_tree(
+                    shell, datastore, program, timeout,
+                    "report-all" if include_defaults else "explicit", **kwargs)
+                if warning:
+                    warnings.append(warning)
+                return data
+
+            failures = {}
+            if export_source == "operational":
+                recovered = read_operational(
+                    lambda module, _tags: export("operational", module),
+                    lambda: export("running"), schema,
+                    progress=_progress, cancelled=self.client.cancel.is_set)
+                data = recovered.data
+                failures = recovered.state_failures
+                warnings.extend(recovered.warnings)
+            else:
+                data = export(export_source)
             comparison = None
-            detail = reason
+            detail = "狀態讀取不完整；未比較。" if failures else reason
             if not detail:
                 try:
-                    comparison = self.client.read(options).data
-                    detail = "已與同設備 NETCONF 新快照比較（非原子讀取；值變動不標紅）。"
+                    snapshot = self.client.read(options)
+                    if snapshot.state_failures:
+                        detail = "NETCONF 狀態讀取不完整；未比較。"
+                    else:
+                        comparison = snapshot.data
+                        detail = "已與同設備 NETCONF 新快照比較（非原子讀取；值變動不標紅）。"
                 except Exception as exc:
                     detail = "NETCONF 讀取失敗（%s）；未比較。" % type(exc).__name__
-            return data, comparison, detail, warning
+            return data, comparison, detail, warnings, failures
 
         def done(result):
-            data, comparison, detail, warning = result
-            self.sysrepo_tree.load(
+            data, comparison, detail, warnings, failures = result
+            tree_state = TreeState.capture(self.sysrepo_tree.tree, schema, self.sysrepo_selection)
+            editor_scroll = (self.editor.verticalScrollBar().value(), self.editor.horizontalScrollBar().value())
+            selection = nearest_selection(data, tree_state.selected, schema)
+            if tree_state.selected and selection is None and children(data):
+                selection = Selection(children(data)[0])
+            self.sysrepo_read_warnings = warnings
+            count = self.sysrepo_tree.load(
                 data, comparison, schema, self.tree_search.text(),
-                self.checks["show_candidates"].isChecked())
+                self.checks["show_candidates"].isChecked(), failures, selection)
+            selected_item = tree_state.restore(self.sysrepo_tree.tree, schema, self.sysrepo_tree.expand, selection)
+            if selected_item is not None:
+                selection = selected_item.data(0, USER_ROLE)
             if self.data_tree_tabs.currentIndex() == 1:
+                self.tree_search_count.setText("" if not self.tree_search.text().strip()
+                                               else "500 筆上限" if count >= 500 else "%d 筆" % count)
                 self._enter_sysrepo_tree_view()
+                if selection is not None:
+                    self._show_sysrepo_selection(selection)
+                    if tree_address(selection, schema) == tree_state.selected:
+                        self.editor.verticalScrollBar().setValue(editor_scroll[0])
+                        self.editor.horizontalScrollBar().setValue(editor_scroll[1])
+            self._update_read_warning()
             message = "已讀取 sysrepocfg %s（唯讀）；%s" % (export_source, detail)
-            if warning:
-                message += " · " + warning
+            if failures:
+                message += " · " + self._state_failure_summary(failures)
+            elif warnings:
+                message += " · " + warnings[0]
+            if tree_state.selected and tree_address(selection, schema) != tree_state.selected:
+                message += " · 選取節點已移除或無法唯一定位；顯示最近可用節點。"
             self.status_label.setText(message)
 
         def failed(exc):
@@ -3449,6 +3514,10 @@ class QtMainWindow(QMainWindow):
 
     def _make_item(self, parent, selection):
         item = QTreeWidgetItem(parent, [self._label(selection)])
+        failure = (self.snapshot.state_failures.get(selection.path[0])
+                   or self.snapshot.state_failures.get("*")) if self.snapshot else None
+        if failure:
+            item.setToolTip(0, tr("此模組狀態讀取失敗；僅顯示 running 設定。") + "\n" + failure)
         item.setData(0, USER_ROLE, selection)
         style = node_style(selection.node, selection.path, self.client.schema)
         self._set_item_style(item, style)
@@ -3485,7 +3554,15 @@ class QtMainWindow(QMainWindow):
         for candidate in candidates(self.client.schema, parent_node, path):
             if candidate.reason.startswith("已存在"):
                 continue
+            if self._candidate_state_unavailable(candidate):
+                continue
             self._candidate_item(parent_item, candidate)
+
+    def _candidate_state_unavailable(self, candidate):
+        failures = (self.sysrepo_tree.state_failures if self.data_tree_tabs.currentIndex() == 1
+                    else self.snapshot.state_failures if self.snapshot else {})
+        return (candidate.info.config is False and
+                ("*" in failures or candidate.info.path[0] in failures))
 
     def _populate_sysrepo_candidates(self, parent_item, parent_node, path):
         """Use the same schema-driven candidate hints for the sysrepocfg tree."""
@@ -3723,14 +3800,14 @@ class QtMainWindow(QMainWindow):
             return
         menu.exec(tree.viewport().mapToGlobal(position))
 
-    def _rebuild_tree(self):
+    def _rebuild_tree(self, keep_selection=False):
         if self.snapshot is None:
             self.tree_search_count.setText("")
             return
         self.tree.clear()
         query = self.tree_search.text().casefold().strip()
         if query:
-            self._populate_search_tree(query)
+            self._populate_search_tree(query, keep_selection)
             return
         self.tree_search_count.setText("")
         bookmark = self.selection.path if self.selection else None
@@ -3742,11 +3819,13 @@ class QtMainWindow(QMainWindow):
             for candidate in candidates(self.client.schema, self.snapshot.data, ()):
                 if candidate.reason.startswith("已存在"):
                     continue
+                if self._candidate_state_unavailable(candidate):
+                    continue
                 self._candidate_item(self.tree, candidate)
         if self.tree.topLevelItemCount() and self.tree.currentItem() is None:
             self.tree.setCurrentItem(self.tree.topLevelItem(0))
 
-    def _populate_search_tree(self, query):
+    def _populate_search_tree(self, query, keep_selection=False):
         """Render complete-snapshot matches and their ancestors, including collapsed nodes."""
         found = search_snapshot(self.snapshot.data, self.client.schema, query, limit=500)
         included = {
@@ -3754,6 +3833,8 @@ class QtMainWindow(QMainWindow):
             for _path, selection in found
             for node in (*selection.ancestors, selection.node)
         }
+        if keep_selection and self.selection is not None:
+            included.update(id(node) for node in (*self.selection.ancestors, self.selection.node))
         selected_item = None
 
         def add(parent, node, ancestors):
@@ -3777,7 +3858,7 @@ class QtMainWindow(QMainWindow):
         for node in children(self.snapshot.data):
             add(self.tree, node, ())
 
-        if not found:
+        if not found and selected_item is None:
             empty_label = "找不到符合「%s」的節點" % self.tree_search.text().strip()
             empty = QTreeWidgetItem(self.tree, [tr(empty_label)])
             empty.setData(0, ITEM_SOURCE_ROLE, empty_label)
@@ -3801,6 +3882,7 @@ class QtMainWindow(QMainWindow):
         else:
             self._leave_sysrepo_tree_view()
             self._rebuild_tree()
+        self._update_read_warning()
 
     def _enter_sysrepo_tree_view(self):
         """Preserve a NETCONF draft while the right pane browses sysrepocfg."""
@@ -3816,6 +3898,26 @@ class QtMainWindow(QMainWindow):
         self.preview.clear()
         self.preview_status.setText("sysrepocfg DATA TREE 唯讀；請選取左側節點")
         self._sync_controls()
+
+    def _state_failure_summary(self, failures):
+        modules = sorted({self.client.schema.namespaces.get(etree.QName(tag).namespace,
+                                                           etree.QName(tag).namespace or tag)
+                          for tag in failures if tag != "*"})
+        return "狀態讀取不完整；失敗模組僅顯示 running 設定：" + (", ".join(modules) or "config false")
+
+    def _update_read_warning(self):
+        active_sysrepo = self.data_tree_tabs.currentIndex() == 1
+        failures = (self.sysrepo_tree.state_failures if active_sysrepo
+                    else self.snapshot.state_failures if self.snapshot else {})
+        warnings = (self.sysrepo_read_warnings if active_sysrepo
+                    else self.snapshot.warnings if self.snapshot else [])
+        errors = (self.sysrepo_tree.value_errors if active_sysrepo
+                  else self.snapshot.value_errors if self.snapshot else {})
+        self.read_warning.setVisible(bool(failures or errors))
+        self.read_warning.setText(self._state_failure_summary(failures) + " · 詳見「連線 / Schema 詳情」。"
+                                  if failures else "decimal64 值不符合 YANG；保留原值，詳見「連線 / Schema 詳情」。"
+                                  if errors else "")
+        self.read_warning.setToolTip("\n\n".join(warnings + list(dict.fromkeys(failures.values())) + list(errors.values())))
 
     def _leave_sysrepo_tree_view(self):
         if self._saved_netconf_view is None:
@@ -3865,16 +3967,23 @@ class QtMainWindow(QMainWindow):
         else:
             self._rebuild_tree()
 
-    def _accept_snapshot(self, snapshot):
+    def _accept_snapshot(self, snapshot, tree_state=None):
+        editor_scroll = (self.editor.verticalScrollBar().value(), self.editor.horizontalScrollBar().value())
+        from .decimal_validation import decimal_diagnostics
+        snapshot.value_errors = decimal_diagnostics(snapshot.data, self.client.schema)
         self.uncertain = False
         self.admin_requires_refresh = False
         self.snapshot = snapshot
-        self.selection = None
+        self.selection = nearest_selection(snapshot.data, tree_state.selected, self.client.schema) if tree_state else None
         self.plan = None
-        self._rebuild_tree()
+        self._rebuild_tree(keep_selection=tree_state is not None)
+        selected_item = (tree_state.restore(self.tree, self.client.schema, self._item_expanded, self.selection)
+                         if tree_state else None)
         actual = [self.tree.topLevelItem(i) for i in range(self.tree.topLevelItemCount())
                   if isinstance(self.tree.topLevelItem(i).data(0, USER_ROLE), Selection)]
-        if actual:
+        if self.selection is not None:
+            self._show_selection(selected_item.data(0, USER_ROLE) if selected_item else self.selection, selected_item)
+        elif actual:
             self.tree.setCurrentItem(actual[0])
             self._show_selection(actual[0].data(0, USER_ROLE), actual[0])
         else:
@@ -3885,10 +3994,18 @@ class QtMainWindow(QMainWindow):
             schema.module_count, len(schema.nodes), "" if schema.complete else "（不完整，唯讀）"))
         message = "已讀取 %s · %d 個根節點" % (snapshot.options.source, len(children(snapshot.data)))
         if snapshot.options.state:
-            message += " + config false"
-        if snapshot.warnings:
+            message += " + config false" if not snapshot.state_failures else " · " + self._state_failure_summary(snapshot.state_failures)
+        if snapshot.value_errors:
+            message += " · decimal64 驗證失敗：%d" % len(snapshot.value_errors)
+        if snapshot.warnings and not snapshot.state_failures:
             message += " · " + " ".join(snapshot.warnings[:2])
+        if tree_state and tree_state.selected and tree_address(self.selection, schema) != tree_state.selected:
+            message += " · 選取節點已移除或無法唯一定位；顯示最近可用節點。"
         self.status_label.setText(message)
+        self._update_read_warning()
+        if tree_state and self.selection and tree_address(self.selection, schema) == tree_state.selected:
+            self.editor.verticalScrollBar().setValue(editor_scroll[0])
+            self.editor.horizontalScrollBar().setValue(editor_scroll[1])
 
     def _show_selection(self, selection, item=None):
         self.selection = selection
@@ -3924,6 +4041,9 @@ class QtMainWindow(QMainWindow):
 
     def _editor_changed(self):
         if not self.busy:
+            entry = self._active_draft()
+            if entry:
+                self._refresh_preserved_drafts.discard(entry.key)
             self.editor_timer.start()
             try:
                 self._capture_draft()
@@ -4026,6 +4146,9 @@ class QtMainWindow(QMainWindow):
                 self._sync_controls()
             return
         if self.selection:
+            entry = self._active_draft()
+            if entry:
+                self._refresh_preserved_drafts.discard(entry.key)
             if self.selection.delete:
                 self.selection = Selection(self.selection.node, self.selection.ancestors,
                                            self.selection.exists, delete=False)
@@ -4076,19 +4199,19 @@ class QtMainWindow(QMainWindow):
             return
         root_tag = self.selection.path[0]
         options = self.snapshot.options
-        self._run("重新讀取所選根節點…", lambda _progress: self.client.read(options, root_tag), self._replace_root)
+        if not self._preserve_refresh_draft():
+            return
+        self.client.cancel.clear()
+        self._run("重新讀取所選根節點…", lambda _progress: self.client.read(options, root_tag),
+                  lambda part: self._replace_root(part, root_tag))
 
-    def _replace_root(self, part):
+    def _replace_root(self, part, root_tag=None):
         if not self.snapshot:
             return
-        data = deepcopy(self.snapshot.data)
-        root_tag = self.selection.path[0] if self.selection else None
+        tree_state = TreeState.capture(self.tree, self.client.schema, self.selection)
+        root_tag = root_tag or (self.selection.path[0] if self.selection else None)
         if root_tag:
-            for node in list(data):
-                if node.tag == root_tag:
-                    data.remove(node)
-            data.extend(deepcopy(node) for node in children(part.data))
-        self._accept_snapshot(Snapshot(data, part.options, part.defaults_mode, part.warnings))
+            self._accept_snapshot(self.snapshot.replace_root(part, root_tag), tree_state)
 
     def _update_diff(self):
         if not self.selection or not self.plan:
@@ -4369,6 +4492,8 @@ class QtMainWindow(QMainWindow):
             return shell
         def done(shell):
             self.sysrepo_tree.clear()
+            self.sysrepo_read_warnings = []
+            self._update_read_warning()
             self.admin_connection = shell
             self.admin_settings = settings
             self.admin_status.setText("系統 SSH：%s@%s:%s（非 NETCONF）" % (settings.username, settings.host, settings.port))
@@ -4382,6 +4507,8 @@ class QtMainWindow(QMainWindow):
 
     def _clear_admin(self):
         self.sysrepo_tree.clear()
+        self.sysrepo_read_warnings = []
+        self._update_read_warning()
         self.sysrepo_selection = None
         if self.data_tree_tabs.currentIndex() == 1:
             self._enter_sysrepo_tree_view()
@@ -4763,8 +4890,9 @@ class QtMainWindow(QMainWindow):
         if not self.selection or not self.snapshot or not self.client.schema.complete:
             return
         entry = self._active_draft()
+        self._refresh_preserved_drafts.intersection_update(self.drafts.entries)
         if not self.dirty:
-            if entry:
+            if entry and entry.key not in self._refresh_preserved_drafts:
                 self.drafts.entries.pop(entry.key, None)
                 self._schedule_drafts()
             return
@@ -4806,6 +4934,17 @@ class QtMainWindow(QMainWindow):
         except Exception as exc:
             self.show_error(exc)
             return False
+
+    def _preserve_refresh_draft(self):
+        if self.dirty and not self._preserve_current_draft(flush=True):
+            return False
+        entry = self._active_draft()
+        if self.dirty and (entry is None or entry.text != self.editor.toPlainText()):
+            self.show_error(EditError("無法保存目前 XML 草稿；請先匯出後再重新讀取。"))
+            return False
+        if entry:
+            self._refresh_preserved_drafts.add(entry.key)
+        return True
 
     def _forget_active_draft(self):
         entry = self._active_draft()
@@ -5590,7 +5729,7 @@ class QtMainWindow(QMainWindow):
         if not hasattr(self, "rpc_preview"):
             return
         try:
-            self.raw_rpc_plan = raw_rpc.prepare(self.rpc_editor.toPlainText())
+            self.raw_rpc_plan = raw_rpc.prepare(self.rpc_editor.toPlainText(), self.client.schema)
             self.rpc_preview.setPlainText(self.raw_rpc_plan.wire_xml)
             self.rpc_status.setText("待送出 RPC 已隨編輯內容更新；尚未送出。")
         except Exception as exc:
@@ -5653,7 +5792,7 @@ class QtMainWindow(QMainWindow):
     def preview_rpc(self):
         try:
             if self.raw_rpc_plan is None:
-                self.raw_rpc_plan = raw_rpc.prepare(self.rpc_editor.toPlainText())
+                self.raw_rpc_plan = raw_rpc.prepare(self.rpc_editor.toPlainText(), self.client.schema)
             self.rpc_preview.setPlainText(self.raw_rpc_plan.wire_xml)
             self.rpc_output_tabs.setCurrentWidget(self.rpc_preview)
             self.rpc_status.setText("RPC 預覽已產生；尚未送出。")
@@ -6004,15 +6143,26 @@ class QtMainWindow(QMainWindow):
                 count = self.epe_bin_count.value()
                 if capability.get("max_bin_count") and count >= int(capability["max_bin_count"]):
                     raise EditError("bin-count 必須小於 DUT max-bin-count。")
-                try:
-                    lower, upper = Decimal(self.epe_lower_bound.text()), Decimal(self.epe_upper_bound.text())
-                    if not all(v.is_finite() and Decimal("-922337203685477.5808") <= v <= Decimal("922337203685477.5807") and
-                               v.as_tuple().exponent >= -4 for v in (lower, upper)) or lower >= upper:
-                        raise ValueError()
-                except (InvalidOperation, ValueError):
-                    raise EditError("請填入有效的 lower-bound < upper-bound（最多 4 位小數）。")
-                for tag, val in (("bin-count", count), ("lower-bound", lower), ("upper-bound", upper)):
-                    etree.SubElement(item, "{%s}%s" % (pm_namespace, tag)).text = str(val)
+                from .decimal_validation import rules_for
+                from ..yang_decimal import Decimal64Error
+                bounds = []
+                for tag, field in (("lower-bound", self.epe_lower_bound), ("upper-bound", self.epe_upper_bound)):
+                    path = tuple("{%s}%s" % (pm_namespace, part) for part in
+                                 ("performance-measurement-objects", "epe-measurement-objects", tag))
+                    rules = rules_for(self.client.schema, path, reference=True)
+                    if rules is None:
+                        raise EditError("無法確認此 DUT 的 EPE decimal64 型別：" + tag)
+                    field.setToolTip("fraction-digits %d; range %s" % (rules.fraction_digits, rules.range_text))
+                    try:
+                        value = rules.validate(field.text(), tag)
+                    except Decimal64Error as exc:
+                        raise EditError(str(exc)) from None
+                    bounds.append((tag, field.text(), value, rules.fraction_digits))
+                if bounds[0][2] * 10**bounds[1][3] >= bounds[1][2] * 10**bounds[0][3]:
+                    raise EditError("請填入有效的 lower-bound < upper-bound。")
+                etree.SubElement(item, "{%s}bin-count" % pm_namespace).text = str(count)
+                for tag, text, _value, _digits in bounds:
+                    etree.SubElement(item, "{%s}%s" % (pm_namespace, tag)).text = text
 
             xml = etree.tostring(root, encoding="unicode", pretty_print=True)
             self.rpc_editor.setPlainText(xml)
@@ -7304,6 +7454,16 @@ class QtMainWindow(QMainWindow):
         lines = self.client.context.status_lines() if self.client.context is not None else ["Offline / Demo"]
         lines += ["", "YANG modules: %d" % self.client.schema.module_count,
                   "Schema complete: " + str(self.client.schema.complete), "", *self.client.schema.warnings]
+        for name, warnings, failures in (
+                ("NETCONF", self.snapshot.warnings if self.snapshot else [],
+                 self.snapshot.state_failures if self.snapshot else {}),
+                ("sysrepocfg", self.sysrepo_read_warnings, self.sysrepo_tree.state_failures)):
+            if warnings or failures:
+                lines += ["", name + " read diagnostics:", *warnings]
+                lines += [tag + "\n" + detail for tag, detail in failures.items()]
+        lines += ["", "decimal64 received-value diagnostics:",
+                  *(self.snapshot.value_errors.values() if self.snapshot else []),
+                  *self.sysrepo_tree.value_errors.values()]
         if self.client.connected and not self.demo:
             lines += ["", "Capabilities:", *self.client.capabilities]
         edit.setPlainText("\n".join(lines))
@@ -7355,7 +7515,8 @@ class QtMainWindow(QMainWindow):
         self.sysrepo_button.setEnabled(not active_sysrepo and idle and bool(self.admin_connection and self.admin_connection.connected)
                                        and can_rpc and self.snapshot.options.source == "running"
                                        and not self.admin_requires_refresh)
-        self.read_button.setEnabled(connected and idle and rpc_allowed)
+        self.read_button.setEnabled(idle and (bool(self.admin_connection and self.admin_connection.connected)
+                                             if active_sysrepo else connected and rpc_allowed))
         self.tree_schema_button.setEnabled(connected and idle and rpc_allowed)
         self.refresh_schema_button.setEnabled(connected and idle and rpc_allowed)
         has_active_tree = (self.sysrepo_tree.data is not None
@@ -7561,6 +7722,19 @@ def install_qt_exception_hook():
 def self_test(window):
     # Exercise the bundled read-only DATA TREE tab without sockets.
     from .software_transfer import local_sftp_username
+    from .decimal_validation import reference_rules
+    from ..yang_decimal import Decimal64Error
+
+    references = reference_rules()
+    latitude = next(rules for path, rules in references.items() if path[-1].endswith("}latitude"))
+    invalid_decimal_rejected = True
+    for value in ("24.817353333333333", "90.00000001", "1e1"):
+        try:
+            latitude.validate(value)
+            invalid_decimal_rejected = False
+        except Decimal64Error:
+            pass
+    latitude.validate("24.81735333")
 
     repo_data = etree.fromstring(b'<data><private xmlns="urn:self-test"><value>1</value></private></data>')
     window.sysrepo_tree.load(repo_data, etree.fromstring(b'<data/>'), window.client.schema)
@@ -7606,6 +7780,8 @@ def self_test(window):
         "netconf_workspace_kept": window.xml_panel is not None and window.editor is not None,
         "sysrepo_controls_in_system_ssh": window.sysrepo_source is not None and window.sysrepo_read_button is not None,
         "automatic_sftp_username_alphanumeric": automatic_sftp_username.startswith("ncc") and automatic_sftp_username.isalnum(),
+        "decimal64_v15_reference_leaves": len(references),
+        "decimal64_fraction_range_checks": invalid_decimal_rejected,
     }
     expected_settings_first_tab = tr("NETCONF連線")
     expected_workspace_tabs = [tr(label) for label in (
@@ -7630,7 +7806,9 @@ def self_test(window):
               and required["data_tree_tabs"] == ["NETCONF", "sysrepocfg"]
               and required["data_tree_tabs_bottom"] and required["sysrepo_missing_red"]
               and required["netconf_workspace_kept"] and required["sysrepo_controls_in_system_ssh"]
-              and required["automatic_sftp_username_alphanumeric"])
+              and required["automatic_sftp_username_alphanumeric"]
+              and required["decimal64_v15_reference_leaves"] == 72
+              and required["decimal64_fraction_range_checks"])
     window.sysrepo_tree.clear()
     window.data_tree_tabs.setCurrentIndex(0)
     return {"passed": passed, "qt": "PySide6", "version": VERSION, "checks": required}

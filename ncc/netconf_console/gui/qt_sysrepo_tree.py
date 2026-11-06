@@ -7,6 +7,7 @@ from .i18n import translate as tr
 from .model import Selection, children, node_style
 from .tree_visibility import visibility
 from .workspace import instance_path, selections
+from .decimal_validation import decimal_diagnostics
 
 ROLE = Qt.ItemDataRole.UserRole
 MISSING_COLOR = "#b42332"
@@ -27,6 +28,8 @@ class SysrepoTreePanel(QWidget):
         self.netconf_data = None
         self.schema = None
         self.states = {}
+        self.state_failures = {}
+        self.value_errors = {}
         self.populate_candidates = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 8, 0)
@@ -36,19 +39,26 @@ class SysrepoTreePanel(QWidget):
         self.tree.itemExpanded.connect(self.expand)
         layout.addWidget(self.tree, 1)
 
-    def load(self, data, netconf_data, schema, query="", show_candidates=False):
+    def load(self, data, netconf_data, schema, query="", show_candidates=False, state_failures=None, keep_selection=None):
         self.data, self.netconf_data, self.schema = data, netconf_data, schema
+        self.state_failures = dict(state_failures or {})
+        self.value_errors = decimal_diagnostics(data, schema)
         self.states = visibility(data, netconf_data, schema)
-        self.rebuild(query, show_candidates)
+        return self.rebuild(query, show_candidates, keep_selection)
 
     def clear(self):
         self.data = None
         self.netconf_data = None
         self.states = {}
+        self.state_failures = {}
+        self.value_errors = {}
         self.tree.clear()
 
     def make_item(self, parent, selection, lazy=True):
         item = QTreeWidgetItem(parent, [self.label(selection)])
+        failure = self.state_failures.get(selection.path[0]) or self.state_failures.get("*")
+        if failure:
+            item.setToolTip(0, tr("此模組狀態讀取失敗；僅顯示 running 設定。") + "\n" + failure)
         item.setData(0, ROLE, selection)
         state = self.states.get(selection.node, "unknown")
         if state == "missing":
@@ -82,7 +92,7 @@ class SysrepoTreePanel(QWidget):
         if self.populate_candidates is not None:
             self.populate_candidates(parent_item, parent_node, path)
 
-    def rebuild(self, query="", show_candidates=False):
+    def rebuild(self, query="", show_candidates=False, keep_selection=None):
         self.tree.clear()
         if self.data is None:
             return 0
@@ -95,6 +105,8 @@ class SysrepoTreePanel(QWidget):
             return 0
         # Search the full XML, not just already-expanded widgets; cap matches.
         included = set()
+        if keep_selection is not None:
+            included.update((*keep_selection.ancestors, keep_selection.node))
         matches = 0
         for selection in selections(self.data):
             info = self.schema.lookup(selection.path)
@@ -117,7 +129,7 @@ class SysrepoTreePanel(QWidget):
 
         for node in children(self.data):
             add(self.tree, node, ())
-        if not matches:
+        if not matches and keep_selection is None:
             empty = QTreeWidgetItem(self.tree, [tr("找不到符合「%s」的節點" % query)])
             empty.setData(0, ROLE, "tree-search-empty")
             empty.setFlags(empty.flags() & ~Qt.ItemFlag.ItemIsEnabled)
